@@ -99,11 +99,19 @@ This repository includes an automated AI-powered code review workflow that runs 
 
 ### Setup
 
-The AI code review is **ready to use** - no additional setup required!
+**One-time setup required:**
 
-- ✅ Connected to centralized review service at: `http://ai-codereview-dev-alb-1334724727.us-east-1.elb.amazonaws.com`
-- ✅ No API keys needed (managed by the central service)
-- ✅ Automatically runs on all pull requests
+1. **Add Access Token Secret:**
+   - Go to your repository **Settings** → **Secrets and variables** → **Actions**
+   - Click **New repository secret**
+   - Name: `AI_REVIEW_ACCESS_TOKEN`
+   - Value: Your centralized service access token (obtain from your admin team)
+
+2. **Ready to use:**
+   - ✅ Connected to centralized review service at: `http://ai-codereview-dev-alb-1334724727.us-east-1.elb.amazonaws.com`
+   - ✅ Automatically runs on all pull requests
+
+📋 **Detailed setup instructions:** [.github/SETUP_INSTRUCTIONS.md](.github/SETUP_INSTRUCTIONS.md)
 
 The AI code review workflow will automatically run on:
 - New pull requests

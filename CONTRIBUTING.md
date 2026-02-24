@@ -87,6 +87,15 @@ Please be respectful and constructive in all interactions. We're all here to lea
 
 This repository uses automated AI-powered code review. Here's what to expect:
 
+### Prerequisites
+
+**Repository Setup (One-time):**
+- Repository maintainers must add the `AI_REVIEW_ACCESS_TOKEN` secret
+- Settings → Secrets and variables → Actions
+- Secret name: `AI_REVIEW_ACCESS_TOKEN`
+- Value: Token from admin team
+- Service: `http://ai-codereview-dev-alb-1334724727.us-east-1.elb.amazonaws.com`
+
 ### What Happens Automatically
 
 When you open a pull request:

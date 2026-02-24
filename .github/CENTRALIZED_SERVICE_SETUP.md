@@ -34,6 +34,7 @@ REVIEW_SERVER_URL: "http://ai-codereview-dev-alb-1334724727.us-east-1.elb.amazon
 Endpoint: POST /api/review
 Headers:
   - Content-Type: application/json
+  - x-access-token: <AI_REVIEW_ACCESS_TOKEN secret>
   - X-GitHub-Token: <auto-provided>
   - X-Repository: <repo-name>
   - X-PR-Number: <pr-number>
@@ -246,7 +247,20 @@ Teams can still customize:
 - Contact service admin team
 - Check service status page
 
-#### 2. No Review Comments Posted
+#### 2. Authentication Failed (401 Unauthorized)
+
+**Symptoms:**
+- "Server response status: 401" in logs
+- Error: "Unauthorized. No authentication credentials provided."
+- Hint: "Provide x-access-token header"
+
+**Solutions:**
+- Verify `AI_REVIEW_ACCESS_TOKEN` secret is set in repository
+- Check if access token has expired
+- Contact admin team for new token
+- Ensure secret name is exactly `AI_REVIEW_ACCESS_TOKEN`
+
+#### 3. No Review Comments Posted
 
 **Symptoms:**
 - Workflow succeeds but no comments appear
@@ -258,7 +272,7 @@ Teams can still customize:
 - Check GitHub token permissions
 - Review Actions logs for errors
 
-#### 3. Review Takes Too Long
+#### 4. Review Takes Too Long
 
 **Symptoms:**
 - Workflow times out

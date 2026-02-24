@@ -40,6 +40,7 @@ jobs:
         env:
           REVIEW_SERVER_URL: "http://ai-codereview-dev-alb-1334724727.us-east-1.elb.amazonaws.com"
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          AI_REVIEW_ACCESS_TOKEN: ${{ secrets.AI_REVIEW_ACCESS_TOKEN }}
           PR_NUMBER: ${{ steps.pr-info.outputs.pr_number }}
         run: |
           echo "🚀 Sending code to centralized AI review server..."
@@ -63,6 +64,7 @@ jobs:
           HTTP_STATUS=$(curl -s -w "%{http_code}" -o review_response.json \
             -X POST \
             -H "Content-Type: application/json" \
+            -H "x-access-token: $AI_REVIEW_ACCESS_TOKEN" \
             -H "X-GitHub-Token: $GITHUB_TOKEN" \
             -H "X-Repository: ${{ github.repository }}" \
             -H "X-PR-Number: $PR_NUMBER" \

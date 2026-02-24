@@ -7,11 +7,15 @@ This repository uses an automated AI-powered code review system that connects to
 **Centralized Service:** `http://ai-codereview-dev-alb-1334724727.us-east-1.elb.amazonaws.com`
 
 **Benefits:**
-- ✅ No setup required - ready to use immediately
-- ✅ No API keys or costs to manage
+- ✅ Simple setup - just add access token secret
+- ✅ No individual API costs to manage
 - ✅ Consistent review standards across all teams
 - ✅ Enterprise-grade AI models and infrastructure
 - ✅ Managed updates and improvements
+
+**Required Setup:**
+- Add `AI_REVIEW_ACCESS_TOKEN` secret to your repository
+- Obtain token from your admin team
 
 ## What Gets Checked?
 

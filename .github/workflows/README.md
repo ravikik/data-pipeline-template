@@ -19,11 +19,14 @@ Automatically reviews pull requests using a centralized AI review service and st
 
 **Setup:**
 
-**No setup required!** The workflow is pre-configured to use the centralized AI review service.
+1. **Add Access Token:**
+   - Go to repository Settings → Secrets and variables → Actions
+   - Add a new secret named `AI_REVIEW_ACCESS_TOKEN`
+   - Paste the access token provided by your admin team
 
 **Centralized Review Service:**
 - URL: `http://ai-codereview-dev-alb-1334724727.us-east-1.elb.amazonaws.com`
-- No API keys needed
+- Authentication: x-access-token header
 - Managed AI models and prompts
 - Enterprise-grade infrastructure
 
@@ -47,6 +50,7 @@ Automatically reviews pull requests using a centralized AI review service and st
 - **ai-security-scan**: Security vulnerability scanning
 
 **Required Secrets:**
+- `AI_REVIEW_ACCESS_TOKEN` - Access token for centralized AI review service (obtain from admin)
 - `GITHUB_TOKEN` - Automatically provided by GitHub Actions (no setup needed)
 
 ---
