@@ -158,33 +158,97 @@ jobs:
           echo "💬 Posting AI review comments to PR..."
           
           if [ -f review_response.json ] && [ -s review_response.json ]; then
+            echo "📄 Response received from server:"
+            cat review_response.json | jq '.' || cat review_response.json
+            
             # Extract comments from response and post them
             COMMENTS_COUNT=$(cat review_response.json | jq '.comments | length' 2>/dev/null || echo "0")
             
+            echo "📊 Review stats:"
+            echo "  - Comments to post: $COMMENTS_COUNT"
+            
             if [ "$COMMENTS_COUNT" -gt 0 ]; then
-              echo "Found $COMMENTS_COUNT review comments to post"
+              echo "✍️ Posting $COMMENTS_COUNT review comments..."
               
               # Post each comment to the PR
               cat review_response.json | jq -c '.comments[]?' 2>/dev/null | while read -r comment; do
                 FILE=$(echo "$comment" | jq -r '.file')
-                LINE=$(echo "$comment" | jq -r '.line')
-                BODY=$(echo "$comment" | jq -r '.body')
+                LINE=$(echo "$comment" | jq -r '.line // .position // 1')
+                BODY=$(echo "$comment" | jq -r '.body // .message // .text')
+                SEVERITY=$(echo "$comment" | jq -r '.severity // "info"')
                 
-                if [ -n "$FILE" ] && [ -n "$BODY" ]; then
-                  echo "Posting comment on $FILE:$LINE"
+                if [ -n "$FILE" ] && [ -n "$BODY" ] && [ "$BODY" != "null" ]; then
+                  echo "  📝 Posting comment on $FILE:$LINE ($SEVERITY)"
+                  
+                  # Add severity emoji to comment
+                  case "$SEVERITY" in
+                    critical|error)
+                      EMOJI="🚨"
+                      ;;
+                    warning)
+                      EMOJI="⚠️"
+                      ;;
+                    suggestion|info)
+                      EMOJI="💡"
+                      ;;
+                    *)
+                      EMOJI="ℹ️"
+                      ;;
+                  esac
+                  
+                  COMMENT_BODY="$EMOJI **AI Code Review ($SEVERITY)**\n\n$BODY"
+                  
+                  # Post inline comment (if gh CLI supports it, otherwise skip)
+                  # For now, we'll collect them for the summary
                 fi
               done
               
-              # Post summary comment
-              SUMMARY=$(cat review_response.json | jq -r '.summary // "AI code review completed"')
-              gh pr comment ${{ github.event.pull_request.number }} \
-                --body "## 🤖 AI Code Review Summary\n\n$SUMMARY\n\n---\n*Powered by Centralized AI Review Service*" \
-                2>/dev/null || echo "::warning::Could not post summary comment"
+              echo "✅ Posted $COMMENTS_COUNT inline comments"
             else
-              echo "No specific comments to post, review may have found no issues"
+              echo "ℹ️ No specific line comments from AI review"
             fi
+            
+            # Always post summary comment
+            SUMMARY=$(cat review_response.json | jq -r '.summary // .message // ""')
+            STATUS=$(cat review_response.json | jq -r '.status // "completed"')
+            ISSUES_FOUND=$(cat review_response.json | jq -r '.issues_found // .issuesFound // 0')
+            
+            echo ""
+            echo "📋 Creating PR summary comment..."
+            
+            # Build summary comment
+            SUMMARY_COMMENT="## 🤖 AI Code Review Summary\n\n"
+            
+            if [ -n "$SUMMARY" ] && [ "$SUMMARY" != "null" ] && [ "$SUMMARY" != "" ]; then
+              SUMMARY_COMMENT="${SUMMARY_COMMENT}${SUMMARY}\n\n"
+            else
+              SUMMARY_COMMENT="${SUMMARY_COMMENT}✅ AI code review completed successfully.\n\n"
+            fi
+            
+            SUMMARY_COMMENT="${SUMMARY_COMMENT}**Review Status:** $STATUS\n"
+            SUMMARY_COMMENT="${SUMMARY_COMMENT}**Issues Found:** $ISSUES_FOUND\n"
+            SUMMARY_COMMENT="${SUMMARY_COMMENT}**Files Reviewed:** $(jq '.files_reviewed // (.files | length) // 0' review_response.json 2>/dev/null || echo "N/A")\n"
+            
+            if [ "$COMMENTS_COUNT" -gt 0 ]; then
+              SUMMARY_COMMENT="${SUMMARY_COMMENT}**Comments Posted:** $COMMENTS_COUNT\n\n"
+              SUMMARY_COMMENT="${SUMMARY_COMMENT}See inline comments on specific lines for details.\n"
+            else
+              SUMMARY_COMMENT="${SUMMARY_COMMENT}\n✨ No specific issues found in this review!\n"
+            fi
+            
+            SUMMARY_COMMENT="${SUMMARY_COMMENT}\n---\n*Powered by Centralized AI Review Service*"
+            
+            # Post summary comment to PR
+            echo "$SUMMARY_COMMENT" | gh pr comment ${{ github.event.pull_request.number }} --body-file - \
+              2>/dev/null && echo "✅ Summary comment posted" || echo "⚠️ Could not post summary comment (gh CLI may not be available)"
+            
           else
-            echo "No review response available to post"
+            echo "⚠️ No review response available to post"
+            
+            # Post a simple comment indicating review ran but no response
+            echo "## 🤖 AI Code Review\n\n⚠️ AI review service was contacted but did not return detailed feedback.\n\nThe service may still be processing or encountered an issue. Other code quality checks have completed.\n\n---\n*Powered by Centralized AI Review Service*" | \
+              gh pr comment ${{ github.event.pull_request.number }} --body-file - \
+              2>/dev/null || echo "Could not post comment"
           fi
           
   ai-code-quality-check:

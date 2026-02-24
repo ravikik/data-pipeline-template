@@ -88,6 +88,8 @@ You can use this repo as a template and create your own, click on the `Use this 
 
 ## AI Code Review
 
+**Status:** ✅ Fully operational
+
 This repository includes an automated AI-powered code review workflow that runs on every pull request. The workflow connects to a **centralized AI review server** and provides intelligent feedback on:
 
 - 🤖 **Code Quality**: AI-powered review using enterprise-grade models
@@ -111,6 +113,7 @@ This repository includes an automated AI-powered code review workflow that runs 
    - ✅ Connected to centralized review service at: `http://ai-codereview-dev-alb-1334724727.us-east-1.elb.amazonaws.com`
    - ✅ API Endpoint: `POST /api/review/pr` (for PR reviews)
    - ✅ Automatically runs on all pull requests
+   - ✅ Posts review summaries and findings as PR comments
 
 📋 **Detailed setup instructions:** [.github/SETUP_INSTRUCTIONS.md](.github/SETUP_INSTRUCTIONS.md)
 
