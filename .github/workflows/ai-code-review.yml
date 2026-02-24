@@ -54,33 +54,42 @@ jobs:
         run: |
           echo "🚀 Sending code to centralized AI review server..."
           
-          # Prepare changed files array
-          FILES_JSON=$(cat changed_files.txt | jq -R -s -c 'split("\n") | map(select(length > 0))')
-          
-          # Escape PR title and description for JSON
-          PR_TITLE=$(echo '${{ github.event.pull_request.title }}' | jq -R -s '.')
-          PR_DESC=$(echo '${{ github.event.pull_request.body }}' | jq -R -s '.' || echo '""')
-          
-          # Get diff content
-          DIFF_CONTENT=$(cat pr_diff.txt | jq -R -s '.')
-          
-          # Prepare the request payload with proper JSON escaping
-          cat > review_request.json <<EOF
-          {
-            "repository": "${{ github.repository }}",
-            "pr_number": $PR_NUMBER,
-            "pr_title": $PR_TITLE,
-            "pr_description": $PR_DESC,
-            "base_branch": "${{ github.base_ref }}",
-            "head_branch": "${{ github.head_ref }}",
-            "author": "${{ github.event.pull_request.user.login }}",
-            "diff": $DIFF_CONTENT,
-            "files": $FILES_JSON
-          }
-          EOF
+          # Build JSON payload using jq to ensure proper escaping and structure
+          jq -n \
+            --arg repo "${{ github.repository }}" \
+            --argjson pr_num "$PR_NUMBER" \
+            --arg pr_title "${{ github.event.pull_request.title }}" \
+            --arg pr_desc "${{ github.event.pull_request.body }}" \
+            --arg base "${{ github.base_ref }}" \
+            --arg head "${{ github.head_ref }}" \
+            --arg author "${{ github.event.pull_request.user.login }}" \
+            --arg diff "$(cat pr_diff.txt)" \
+            --argjson files "$(cat changed_files.txt | jq -R -s -c 'split("\n") | map(select(length > 0))')" \
+            '{
+              repository: $repo,
+              pr_number: $pr_num,
+              pr_title: $pr_title,
+              pr_description: ($pr_desc // ""),
+              base_branch: $base,
+              head_branch: $head,
+              author: $author,
+              diff: $diff,
+              files: $files
+            }' > review_request.json
           
           echo "📦 Request payload prepared ($(wc -c < review_request.json) bytes)"
-          echo "📄 Files to review: $(echo $FILES_JSON | jq 'length')"
+          echo "📄 Files to review: $(jq '.files | length' review_request.json)"
+          
+          # Debug: Show payload structure (redact large diff field)
+          echo "📋 Payload structure:"
+          jq '{repository, pr_number, pr_title, base_branch, head_branch, author, files, diff_length: (.diff | length)}' review_request.json
+          
+          # Validate JSON structure
+          if ! jq empty review_request.json 2>/dev/null; then
+            echo "❌ Invalid JSON payload generated"
+            cat review_request.json
+            exit 1
+          fi
           
           # Send request to centralized server
           HTTP_STATUS=$(curl -s -w "%{http_code}" -o review_response.json \
@@ -111,7 +120,20 @@ jobs:
           else
             echo "⚠️  Warning: Centralized review server returned status $HTTP_STATUS"
             echo "Response:"
-            cat review_response.json 2>/dev/null || echo "No response body"
+            if [ -f review_response.json ]; then
+              cat review_response.json
+              
+              # If 500 error, show more debug info
+              if [ "$HTTP_STATUS" -eq 500 ]; then
+                echo ""
+                echo "🔍 Debug Info:"
+                echo "Request payload sent (first 500 chars):"
+                head -c 500 review_request.json
+                echo "..."
+              fi
+            else
+              echo "No response body"
+            fi
             
             # Don't fail the workflow, just warn
             echo "::warning::AI code review server is unavailable or returned an error. Continuing with other checks."

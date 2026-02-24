@@ -135,24 +135,44 @@ Response: {"error":"Batch review failed","details":"Cannot read properties of un
 ```
 
 **Possible Causes:**
-1. Malformed JSON payload
-2. Missing required fields
-3. Empty or invalid data in fields
-4. PR number sent as string instead of number
-5. Improperly escaped JSON content
+1. Server-side parsing issue with payload structure
+2. Missing or null required fields
+3. Incorrect data types in payload
+4. Server expects different field names or structure
+5. Incompatibility between workflow payload and server expectations
 
-**Solutions:**
-1. Check workflow logs for "Request payload prepared" message
-2. Verify all required fields are present and valid
-3. Ensure `pr_number` is a number (not quoted string)
-4. Check that `files` array is not empty
-5. Verify JSON escaping is correct
-6. Contact admin team if issue persists
+**Immediate Actions:**
+1. **Check the debug output** in workflow logs for:
+   - "📋 Payload structure:" - shows what's being sent
+   - "🔍 Debug Info:" - shows first part of request
 
-**Debug Steps:**
-```bash
-# In workflow, add this before sending request:
-cat review_request.json | jq '.'  # Validate JSON syntax
+2. **Verify payload matches API spec:**
+   ```json
+   {
+     "repository": "owner/repo",
+     "pr_number": 123,        // Number, not string
+     "pr_title": "...",
+     "pr_description": "...", // Can be empty string
+     "base_branch": "main",
+     "head_branch": "feature/...",
+     "author": "username",
+     "diff": "...",           // Full git diff
+     "files": ["file1.py"]    // Non-empty array
+   }
+   ```
+
+3. **Contact admin team** with:
+   - Workflow run URL
+   - The "📋 Payload structure" output from logs
+   - Error message details
+   - Request them to check server-side logs for the specific error
+
+**Workaround:**
+If the issue persists, you can disable the AI review temporarily:
+```yaml
+# Comment out the AI review step in .github/workflows/ai-code-review.yml
+# - name: Send to Centralized AI Review Server
+#   if: steps.pr-info.outputs.has_changes == 'true'
 ```
 
 ### ❌ HTTP 403 - Forbidden
