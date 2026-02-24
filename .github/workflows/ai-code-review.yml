@@ -69,7 +69,7 @@ jobs:
             -H "X-Repository: ${{ github.repository }}" \
             -H "X-PR-Number: $PR_NUMBER" \
             -d @review_request.json \
-            "$REVIEW_SERVER_URL/review")
+            "$REVIEW_SERVER_URL/api/review/pr")
           
           echo "📡 Server response status: $HTTP_STATUS"
           

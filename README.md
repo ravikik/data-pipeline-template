@@ -109,6 +109,7 @@ This repository includes an automated AI-powered code review workflow that runs 
 
 2. **Ready to use:**
    - ✅ Connected to centralized review service at: `http://ai-codereview-dev-alb-1334724727.us-east-1.elb.amazonaws.com`
+   - ✅ API Endpoint: `POST /api/review/pr` (for PR reviews)
    - ✅ Automatically runs on all pull requests
 
 📋 **Detailed setup instructions:** [.github/SETUP_INSTRUCTIONS.md](.github/SETUP_INSTRUCTIONS.md)

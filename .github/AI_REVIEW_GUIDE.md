@@ -214,10 +214,15 @@ jobs:
 - "Service unavailable" messages
 
 **Solutions:**
-- If 404: Endpoint may be `/review` instead of `/api/review`
+- If 404: Verify endpoint is `/api/review/pr` for PR reviews
 - Contact service admin team
 - Check service status page
 - Verify endpoint URL in workflow file
+
+**Correct API endpoints:**
+- PR Reviews: `POST /api/review/pr` (default for this workflow)
+- Batch by pattern: `POST /api/batch-review/by-pattern`
+- Batch explicit: `POST /api/review/batch`
 
 ### "Too many comments from AI"
 

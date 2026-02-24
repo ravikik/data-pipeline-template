@@ -26,9 +26,15 @@ Automatically reviews pull requests using a centralized AI review service and st
 
 **Centralized Review Service:**
 - URL: `http://ai-codereview-dev-alb-1334724727.us-east-1.elb.amazonaws.com`
+- API Endpoint: `POST /api/review/pr` (for PR reviews)
 - Authentication: x-access-token header
 - Managed AI models and prompts
 - Enterprise-grade infrastructure
+
+**Available API Endpoints:**
+- `POST /api/review/pr` - PR changed files (used by this workflow)
+- `POST /api/batch-review/by-pattern` - Scheduled/branch scans
+- `POST /api/review/batch` - Explicit file lists
 
 **The workflow automatically runs on:**
 - New pull requests

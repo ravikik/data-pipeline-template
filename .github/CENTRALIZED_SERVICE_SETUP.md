@@ -31,7 +31,7 @@ The AI code review workflow has been successfully updated to connect to your **c
 **API Integration:**
 ```yaml
 REVIEW_SERVER_URL: "http://ai-codereview-dev-alb-1334724727.us-east-1.elb.amazonaws.com"
-Endpoint: POST /review
+Endpoint: POST /api/review/pr  # For PR changed files (GitHub Actions)
 Headers:
   - Content-Type: application/json
   - x-access-token: <AI_REVIEW_ACCESS_TOKEN secret>
@@ -39,6 +39,16 @@ Headers:
   - X-Repository: <repo-name>
   - X-PR-Number: <pr-number>
 ```
+
+**Available Endpoints:**
+
+| Endpoint | Scenario | Use Case |
+|----------|----------|----------|
+| `POST /api/review/pr` | **GitHub Actions on PR** ← *Default* | Reviews only changed files in a pull request |
+| `POST /api/batch-review/by-pattern` | Scheduled/Branch Scan | Scans files matching a glob pattern |
+| `POST /api/review/batch` | Explicit File List | Reviews specific files from git diff or list |
+
+**This workflow uses:** `POST /api/review/pr` for automatic PR reviews
 
 ---
 
@@ -124,7 +134,7 @@ GitHub Actions Triggered
 Extract PR Diff & Metadata
     ↓
 Send to Centralized Service
-(POST /api/review)
+(POST /api/review/pr)
     ↓
 AI Service Analyzes Code
     ↓
@@ -165,6 +175,119 @@ Review Complete
     }
   ]
 }
+```
+
+---
+
+## API Endpoints Reference
+
+The centralized service provides multiple endpoints for different review scenarios:
+
+### 1. PR Review Endpoint (Default)
+
+**Endpoint:** `POST /api/review/pr`
+
+**Use Case:** GitHub Actions on pull requests (changed files only)
+
+**When to use:**
+- Automatic PR reviews in CI/CD
+- Reviewing only the files changed in a PR
+- Integrated with GitHub Actions workflow (default setup)
+
+**Request Payload:**
+```json
+{
+  "repository": "owner/repo-name",
+  "pr_number": "123",
+  "pr_title": "Add new feature",
+  "pr_description": "Description...",
+  "base_branch": "main",
+  "head_branch": "feature/new-thing",
+  "author": "username",
+  "diff": "...full diff...",
+  "changed_files": ["file1.py", "file2.yml"]
+}
+```
+
+---
+
+### 2. Batch Review by Pattern
+
+**Endpoint:** `POST /api/batch-review/by-pattern`
+
+**Use Case:** Scheduled scans or branch scans using glob patterns
+
+**When to use:**
+- Periodic code quality scans
+- Scanning entire branches or directories
+- Reviewing files matching specific patterns (e.g., `**/*.py`)
+
+**Example Request:**
+```json
+{
+  "repository": "owner/repo-name",
+  "branch": "main",
+  "pattern": "src/**/*.py",
+  "exclude": ["**/tests/**", "**/__pycache__/**"]
+}
+```
+
+**Example Workflow (Scheduled Scan):**
+```yaml
+name: Weekly Code Review
+on:
+  schedule:
+    - cron: '0 0 * * 0'  # Every Sunday
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Scan Python files
+        run: |
+          curl -X POST \
+            -H "x-access-token: ${{ secrets.AI_REVIEW_ACCESS_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d '{"repository":"${{ github.repository }}","branch":"main","pattern":"**/*.py"}' \
+            http://ai-codereview-dev-alb-1334724727.us-east-1.elb.amazonaws.com/api/batch-review/by-pattern
+```
+
+---
+
+### 3. Batch Review by File List
+
+**Endpoint:** `POST /api/review/batch`
+
+**Use Case:** Review specific files from git diff or explicit list
+
+**When to use:**
+- Custom file selections
+- Files from git diff between branches
+- Manually specified file lists
+
+**Example Request:**
+```json
+{
+  "repository": "owner/repo-name",
+  "branch": "feature/branch",
+  "files": [
+    "src/main.py",
+    "src/utils/helper.py",
+    "config/settings.yml"
+  ]
+}
+```
+
+**Example Workflow (Compare Branches):**
+```yaml
+- name: Review changed files between branches
+  run: |
+    FILES=$(git diff --name-only main..develop | jq -R -s -c 'split("\n") | map(select(length > 0))')
+    curl -X POST \
+      -H "x-access-token: ${{ secrets.AI_REVIEW_ACCESS_TOKEN }}" \
+      -H "Content-Type: application/json" \
+      -d "{\"repository\":\"${{ github.repository }}\",\"branch\":\"develop\",\"files\":$FILES}" \
+      http://ai-codereview-dev-alb-1334724727.us-east-1.elb.amazonaws.com/api/review/batch
 ```
 
 ---

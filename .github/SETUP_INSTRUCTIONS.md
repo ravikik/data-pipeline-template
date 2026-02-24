@@ -14,6 +14,7 @@ Contact your **admin team** or **platform team** to obtain the AI Review Service
 - "AI Code Review Service Access Token"
 - For repository: `[your-repository-name]`
 - Service endpoint: `http://ai-codereview-dev-alb-1334724727.us-east-1.elb.amazonaws.com`
+- API endpoint: `POST /api/review/pr` (for PR reviews)
 
 **Expected response:**
 - You'll receive a token string (e.g., `abc123xyz...`)
@@ -99,9 +100,14 @@ Response: Cannot POST /api/review
 ```
 
 **Solutions:**
-1. Endpoint path may have changed - verify with admin team
+1. Verify endpoint path is `/api/review/pr` for PR reviews
 2. Check service documentation for correct endpoint
-3. Workflow uses `/review` endpoint (not `/api/review`)
+3. Contact admin team if endpoint has changed
+
+**Correct endpoints:**
+- PR Reviews: `POST /api/review/pr`
+- Batch by pattern: `POST /api/batch-review/by-pattern`
+- Batch explicit: `POST /api/review/batch`
 
 ### ❌ HTTP 403 - Forbidden
 
