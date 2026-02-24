@@ -55,6 +55,7 @@ jobs:
           echo "🚀 Sending code to centralized AI review server..."
           
           # Build JSON payload using jq to ensure proper escaping and structure
+          # Use --rawfile to handle large diffs without hitting argument list limits
           jq -n \
             --arg repo "${{ github.repository }}" \
             --argjson pr_num "$PR_NUMBER" \
@@ -63,7 +64,7 @@ jobs:
             --arg base "${{ github.base_ref }}" \
             --arg head "${{ github.head_ref }}" \
             --arg author "${{ github.event.pull_request.user.login }}" \
-            --arg diff "$(cat pr_diff.txt)" \
+            --rawfile diff pr_diff.txt \
             --argjson files "$(cat changed_files.txt | jq -R -s -c 'split("\n") | map(select(length > 0))')" \
             '{
               repository: $repo,
@@ -184,7 +185,7 @@ jobs:
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: review-results
+          name: review-results-ai
           path: review-outputs/
           retention-days: 30
           
@@ -269,7 +270,7 @@ jobs:
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: review-results
+          name: review-results-quality
           path: review-outputs/
           retention-days: 30
 
@@ -352,7 +353,7 @@ jobs:
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: review-results
+          name: review-results-complexity
           path: review-outputs/
           retention-days: 30
 
@@ -403,7 +404,7 @@ jobs:
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: review-results
+          name: review-results-security
           path: review-outputs/
           retention-days: 30
 
@@ -444,8 +445,9 @@ jobs:
       - name: Download all review results
         uses: actions/download-artifact@v4
         with:
-          name: review-results
+          pattern: review-results-*
           path: review-outputs/
+          merge-multiple: true
 
       - name: Aggregate all issues
         run: |
