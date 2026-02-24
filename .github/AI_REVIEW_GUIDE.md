@@ -209,12 +209,17 @@ jobs:
 
 **Symptoms:**
 - HTTP 404 (endpoint not found)
+- HTTP 500 (server error - "Cannot read properties of undefined")
 - HTTP 500+ errors
 - Timeout errors
 - "Service unavailable" messages
 
 **Solutions:**
 - If 404: Verify endpoint is `/api/review/pr` for PR reviews
+- If 500 with "Cannot read properties": Check JSON payload format
+  - Ensure `pr_number` is a number (not string)
+  - Verify `files` array is not empty
+  - Check all fields are properly escaped
 - Contact service admin team
 - Check service status page
 - Verify endpoint URL in workflow file

@@ -126,6 +126,35 @@ Response: Cannot POST /api/review
 - Batch by pattern: `POST /api/batch-review/by-pattern`
 - Batch explicit: `POST /api/review/batch`
 
+### ❌ HTTP 500 - Server Error
+
+**Error message:**
+```
+📡 Server response status: 500
+Response: {"error":"Batch review failed","details":"Cannot read properties of undefined (reading 'split')"}
+```
+
+**Possible Causes:**
+1. Malformed JSON payload
+2. Missing required fields
+3. Empty or invalid data in fields
+4. PR number sent as string instead of number
+5. Improperly escaped JSON content
+
+**Solutions:**
+1. Check workflow logs for "Request payload prepared" message
+2. Verify all required fields are present and valid
+3. Ensure `pr_number` is a number (not quoted string)
+4. Check that `files` array is not empty
+5. Verify JSON escaping is correct
+6. Contact admin team if issue persists
+
+**Debug Steps:**
+```bash
+# In workflow, add this before sending request:
+cat review_request.json | jq '.'  # Validate JSON syntax
+```
+
 ### ❌ HTTP 403 - Forbidden
 
 **Error message:**

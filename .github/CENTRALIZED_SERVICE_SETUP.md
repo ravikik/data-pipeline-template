@@ -150,7 +150,7 @@ Review Complete
 ```json
 {
   "repository": "owner/repo-name",
-  "pr_number": "123",
+  "pr_number": 123,
   "pr_title": "Add new feature",
   "pr_description": "Description...",
   "base_branch": "main",
@@ -160,6 +160,11 @@ Review Complete
   "files": ["file1.py", "file2.yml"]
 }
 ```
+
+**Field Types:**
+- `repository`: string
+- `pr_number`: number (not string!)
+- `files`: array of strings (required, non-empty)
 
 ### Expected Response
 
@@ -198,16 +203,21 @@ The centralized service provides multiple endpoints for different review scenari
 ```json
 {
   "repository": "owner/repo-name",
-  "pr_number": "123",
+  "pr_number": 123,                    // ← Number, not string!
   "pr_title": "Add new feature",
   "pr_description": "Description...",
   "base_branch": "main",
   "head_branch": "feature/new-thing",
   "author": "username",
   "diff": "...full diff...",
-  "files": ["file1.py", "file2.yml"]
+  "files": ["file1.py", "file2.yml"]  // ← Must not be empty
 }
 ```
+
+**Important:**
+- `pr_number` must be a **number**, not a string
+- `files` must be an **array** and cannot be empty
+- All string fields must be properly JSON-escaped
 
 ---
 
@@ -360,11 +370,18 @@ Teams can still customize:
 #### 1. Service Connection Failed
 
 **Symptoms:**
+- HTTP 500 errors with "Cannot read properties of undefined"
 - HTTP 500+ errors
 - Timeout errors
 - "Service unavailable" messages
 
 **Solutions:**
+- **If 500 with "Cannot read properties":**
+  - Check JSON payload format (see below)
+  - Ensure `pr_number` is a number, not string
+  - Verify `files` array is not empty
+  - Check all fields are properly JSON-escaped
+  - Review workflow logs for payload details
 - Check service endpoint URL in workflow
 - Verify network connectivity
 - Contact service admin team
@@ -412,15 +429,24 @@ Teams can still customize:
    - Go to Actions tab
    - Click on failed workflow
    - Review "AI Code Review" job logs
+   - Look for "Request payload prepared" message
 
 2. **Verify Service Response:**
    ```bash
    # Look for in workflow logs:
    "Server response status: 200"
    "Review ID: ..."
+   "📦 Request payload prepared (X bytes)"
+   "📄 Files to review: N"
    ```
 
-3. **Test Service Manually:**
+3. **Validate JSON Payload:**
+   - Check that `pr_number` is a number (no quotes)
+   - Verify `files` array has elements
+   - Ensure all strings are properly escaped
+   - Confirm no undefined or null values in required fields
+
+4. **Test Service Manually:**
    ```bash
    curl -X POST http://ai-codereview-dev-alb-1334724727.us-east-1.elb.amazonaws.com/api/health
    ```

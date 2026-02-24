@@ -35,8 +35,17 @@ jobs:
           echo "Number: $PR_NUMBER"
           echo "Files changed: $(cat changed_files.txt | wc -l)"
           echo "Diff size: $(cat pr_diff.txt | wc -l) lines"
+          
+          # Check if there are any changed files
+          if [ ! -s changed_files.txt ]; then
+            echo "⚠️ No files changed in this PR"
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+          else
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+          fi
 
       - name: Send to Centralized AI Review Server
+        if: steps.pr-info.outputs.has_changes == 'true'
         env:
           REVIEW_SERVER_URL: "http://ai-codereview-dev-alb-1334724727.us-east-1.elb.amazonaws.com"
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -45,20 +54,33 @@ jobs:
         run: |
           echo "🚀 Sending code to centralized AI review server..."
           
-          # Prepare the request payload
+          # Prepare changed files array
+          FILES_JSON=$(cat changed_files.txt | jq -R -s -c 'split("\n") | map(select(length > 0))')
+          
+          # Escape PR title and description for JSON
+          PR_TITLE=$(echo '${{ github.event.pull_request.title }}' | jq -R -s '.')
+          PR_DESC=$(echo '${{ github.event.pull_request.body }}' | jq -R -s '.' || echo '""')
+          
+          # Get diff content
+          DIFF_CONTENT=$(cat pr_diff.txt | jq -R -s '.')
+          
+          # Prepare the request payload with proper JSON escaping
           cat > review_request.json <<EOF
           {
             "repository": "${{ github.repository }}",
-            "pr_number": "$PR_NUMBER",
-            "pr_title": "${{ github.event.pull_request.title }}",
-            "pr_description": $(echo '${{ github.event.pull_request.body }}' | jq -Rs .),
+            "pr_number": $PR_NUMBER,
+            "pr_title": $PR_TITLE,
+            "pr_description": $PR_DESC,
             "base_branch": "${{ github.base_ref }}",
             "head_branch": "${{ github.head_ref }}",
             "author": "${{ github.event.pull_request.user.login }}",
-            "diff": $(cat pr_diff.txt | jq -Rs .),
-            "files": $(cat changed_files.txt | jq -Rs . | jq 'split("\n") | map(select(length > 0))')
+            "diff": $DIFF_CONTENT,
+            "files": $FILES_JSON
           }
           EOF
+          
+          echo "📦 Request payload prepared ($(wc -c < review_request.json) bytes)"
+          echo "📄 Files to review: $(echo $FILES_JSON | jq 'length')"
           
           # Send request to centralized server
           HTTP_STATUS=$(curl -s -w "%{http_code}" -o review_response.json \
