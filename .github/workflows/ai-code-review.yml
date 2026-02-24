@@ -56,7 +56,7 @@ jobs:
             "head_branch": "${{ github.head_ref }}",
             "author": "${{ github.event.pull_request.user.login }}",
             "diff": $(cat pr_diff.txt | jq -Rs .),
-            "changed_files": $(cat changed_files.txt | jq -Rs . | jq 'split("\n") | map(select(length > 0))')
+            "files": $(cat changed_files.txt | jq -Rs . | jq 'split("\n") | map(select(length > 0))')
           }
           EOF
           

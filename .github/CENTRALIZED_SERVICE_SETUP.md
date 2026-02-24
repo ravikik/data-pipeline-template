@@ -157,7 +157,7 @@ Review Complete
   "head_branch": "feature/new-thing",
   "author": "username",
   "diff": "...full diff...",
-  "changed_files": ["file1.py", "file2.yml"]
+  "files": ["file1.py", "file2.yml"]
 }
 ```
 
@@ -205,7 +205,7 @@ The centralized service provides multiple endpoints for different review scenari
   "head_branch": "feature/new-thing",
   "author": "username",
   "diff": "...full diff...",
-  "changed_files": ["file1.py", "file2.yml"]
+  "files": ["file1.py", "file2.yml"]
 }
 ```
 

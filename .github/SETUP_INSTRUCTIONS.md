@@ -76,6 +76,23 @@ Contact your **admin team** or **platform team** to obtain the AI Review Service
 
 ## Troubleshooting
 
+### ❌ HTTP 400 - Bad Request
+
+**Error message:**
+```
+📡 Server response status: 400
+Response: {"error":"files array is required"}
+```
+
+**Solutions:**
+1. Ensure payload includes `files` array (not `changed_files`)
+2. Verify JSON payload is properly formatted
+3. Check that files array is not empty
+4. Ensure all required fields are present:
+   - `repository`
+   - `pr_number`
+   - `files` (array of file paths)
+
 ### ❌ HTTP 401 - Unauthorized
 
 **Error message:**
