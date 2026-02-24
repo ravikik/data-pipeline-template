@@ -316,17 +316,17 @@ Edit retention periods in workflow files:
 
 ```yaml
 # Review results: 30 days
-- uses: actions/upload-artifact@v3
+- uses: actions/upload-artifact@v4
   with:
     retention-days: 30
 
 # Full reports: 90 days
-- uses: actions/upload-artifact@v3
+- uses: actions/upload-artifact@v4
   with:
     retention-days: 90
 
 # Metrics: 365 days
-- uses: actions/upload-artifact@v3
+- uses: actions/upload-artifact@v4
   with:
     retention-days: 365
 ```

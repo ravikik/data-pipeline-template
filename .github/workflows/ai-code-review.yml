@@ -181,7 +181,7 @@ jobs:
           echo "✅ AI review results saved"
 
       - name: Upload AI review results
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         if: always()
         with:
           name: review-results
@@ -266,7 +266,7 @@ jobs:
           fi
 
       - name: Upload quality check results
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         if: always()
         with:
           name: review-results
@@ -349,7 +349,7 @@ jobs:
           fi
 
       - name: Upload complexity results
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         if: always()
         with:
           name: review-results
@@ -400,7 +400,7 @@ jobs:
           fi
 
       - name: Upload security scan results
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         if: always()
         with:
           name: review-results
@@ -442,7 +442,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Download all review results
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: review-results
           path: review-outputs/
@@ -662,7 +662,7 @@ jobs:
           echo "✅ Comprehensive review posted to PR"
 
       - name: Upload review report as artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         if: always()
         with:
           name: code-review-report
@@ -697,7 +697,7 @@ jobs:
           echo "✅ Metrics saved"
 
       - name: Upload metrics data
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         if: always()
         with:
           name: review-metrics
