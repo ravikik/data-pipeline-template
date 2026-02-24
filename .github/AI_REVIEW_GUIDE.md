@@ -197,13 +197,28 @@ jobs:
 - PR only modifies excluded files (JSON, MD, etc.)
 - Workflow file has syntax errors
 - `OPENAI_API_KEY` secret not configured
-Centralized review service is unavailable
-
 **Solution:**
-1. Check Actions tab for error messages
-2. Verify network connectivity to review service
-3. Ensure workflow file is valid YAML
-4. Check service status with your admin team
+1. Check Actions tab for error messages (look for 401 Unauthorized)
+2. Verify `AI_REVIEW_ACCESS_TOKEN` is set in repository secrets
+3. Confirm access token is valid (contact admin if expired)
+4. Verify network connectivity to review service
+5. Ensure workflow file is valid YAML
+6. Check service status with your admin team
+
+### "Service unavailable"
+
+**Symptoms:**
+- HTTP 404 (endpoint not found)
+- HTTP 500+ errors
+- Timeout errors
+- "Service unavailable" messages
+
+**Solutions:**
+- If 404: Endpoint may be `/review` instead of `/api/review`
+- Contact service admin team
+- Check service status page
+- Verify endpoint URL in workflow file
+
 ### "Too many comments from AI"
 
 **Solution:**
@@ -220,9 +235,9 @@ Centralized review service is unavailable
 
 ### "OpenAI API quota exceeded"
 
-**Not applicable - using centralized service
-- Contact your admin team if service is experiencing issues (cheaper)
-- Reduce review frequency
+**Solution:**
+- Not applicable - using centralized service
+- Contact your admin team if service is experiencing issues
 
 ## Cost Management
 

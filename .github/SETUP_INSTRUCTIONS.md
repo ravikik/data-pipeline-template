@@ -90,6 +90,19 @@ Response: {"error":"Unauthorized. No authentication credentials provided."}
 3. Ensure you added the secret to the correct repository
 4. Try removing and re-adding the secret
 
+### ❌ HTTP 404 - Not Found
+
+**Error message:**
+```
+📡 Server response status: 404
+Response: Cannot POST /api/review
+```
+
+**Solutions:**
+1. Endpoint path may have changed - verify with admin team
+2. Check service documentation for correct endpoint
+3. Workflow uses `/review` endpoint (not `/api/review`)
+
 ### ❌ HTTP 403 - Forbidden
 
 **Error message:**

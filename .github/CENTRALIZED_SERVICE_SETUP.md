@@ -31,7 +31,7 @@ The AI code review workflow has been successfully updated to connect to your **c
 **API Integration:**
 ```yaml
 REVIEW_SERVER_URL: "http://ai-codereview-dev-alb-1334724727.us-east-1.elb.amazonaws.com"
-Endpoint: POST /api/review
+Endpoint: POST /review
 Headers:
   - Content-Type: application/json
   - x-access-token: <AI_REVIEW_ACCESS_TOKEN secret>
