@@ -150,106 +150,43 @@ jobs:
             echo "::warning::AI code review server is unavailable or returned an error. Continuing with other checks."
           fi
 
-      - name: Post review comments to PR
-        if: success()
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Save AI review results
+        if: always()
         run: |
-          echo "💬 Posting AI review comments to PR..."
+          mkdir -p review-outputs
           
-          if [ -f review_response.json ] && [ -s review_response.json ]; then
-            echo "📄 Response received from server:"
-            cat review_response.json | jq '.' || cat review_response.json
+          # Save AI review response
+          if [ -f review_response.json ]; then
+            cp review_response.json review-outputs/ai-review.json
             
-            # Extract comments from response and post them
-            COMMENTS_COUNT=$(cat review_response.json | jq '.comments | length' 2>/dev/null || echo "0")
-            
-            echo "📊 Review stats:"
-            echo "  - Comments to post: $COMMENTS_COUNT"
-            
-            if [ "$COMMENTS_COUNT" -gt 0 ]; then
-              echo "✍️ Posting $COMMENTS_COUNT review comments..."
-              
-              # Post each comment to the PR
-              cat review_response.json | jq -c '.comments[]?' 2>/dev/null | while read -r comment; do
-                FILE=$(echo "$comment" | jq -r '.file')
-                LINE=$(echo "$comment" | jq -r '.line // .position // 1')
-                BODY=$(echo "$comment" | jq -r '.body // .message // .text')
-                SEVERITY=$(echo "$comment" | jq -r '.severity // "info"')
-                
-                if [ -n "$FILE" ] && [ -n "$BODY" ] && [ "$BODY" != "null" ]; then
-                  echo "  📝 Posting comment on $FILE:$LINE ($SEVERITY)"
-                  
-                  # Add severity emoji to comment
-                  case "$SEVERITY" in
-                    critical|error)
-                      EMOJI="🚨"
-                      ;;
-                    warning)
-                      EMOJI="⚠️"
-                      ;;
-                    suggestion|info)
-                      EMOJI="💡"
-                      ;;
-                    *)
-                      EMOJI="ℹ️"
-                      ;;
-                  esac
-                  
-                  COMMENT_BODY="$EMOJI **AI Code Review ($SEVERITY)**\n\n$BODY"
-                  
-                  # Post inline comment (if gh CLI supports it, otherwise skip)
-                  # For now, we'll collect them for the summary
-                fi
-              done
-              
-              echo "✅ Posted $COMMENTS_COUNT inline comments"
-            else
-              echo "ℹ️ No specific line comments from AI review"
-            fi
-            
-            # Always post summary comment
-            SUMMARY=$(cat review_response.json | jq -r '.summary // .message // ""')
-            STATUS=$(cat review_response.json | jq -r '.status // "completed"')
-            ISSUES_FOUND=$(cat review_response.json | jq -r '.issues_found // .issuesFound // 0')
-            
-            echo ""
-            echo "📋 Creating PR summary comment..."
-            
-            # Build summary comment
-            SUMMARY_COMMENT="## 🤖 AI Code Review Summary\n\n"
-            
-            if [ -n "$SUMMARY" ] && [ "$SUMMARY" != "null" ] && [ "$SUMMARY" != "" ]; then
-              SUMMARY_COMMENT="${SUMMARY_COMMENT}${SUMMARY}\n\n"
-            else
-              SUMMARY_COMMENT="${SUMMARY_COMMENT}✅ AI code review completed successfully.\n\n"
-            fi
-            
-            SUMMARY_COMMENT="${SUMMARY_COMMENT}**Review Status:** $STATUS\n"
-            SUMMARY_COMMENT="${SUMMARY_COMMENT}**Issues Found:** $ISSUES_FOUND\n"
-            SUMMARY_COMMENT="${SUMMARY_COMMENT}**Files Reviewed:** $(jq '.files_reviewed // (.files | length) // 0' review_response.json 2>/dev/null || echo "N/A")\n"
-            
-            if [ "$COMMENTS_COUNT" -gt 0 ]; then
-              SUMMARY_COMMENT="${SUMMARY_COMMENT}**Comments Posted:** $COMMENTS_COUNT\n\n"
-              SUMMARY_COMMENT="${SUMMARY_COMMENT}See inline comments on specific lines for details.\n"
-            else
-              SUMMARY_COMMENT="${SUMMARY_COMMENT}\n✨ No specific issues found in this review!\n"
-            fi
-            
-            SUMMARY_COMMENT="${SUMMARY_COMMENT}\n---\n*Powered by Centralized AI Review Service*"
-            
-            # Post summary comment to PR
-            echo "$SUMMARY_COMMENT" | gh pr comment ${{ github.event.pull_request.number }} --body-file - \
-              2>/dev/null && echo "✅ Summary comment posted" || echo "⚠️ Could not post summary comment (gh CLI may not be available)"
-            
+            # Extract issues in standardized format
+            cat review_response.json | jq '{
+              source: "AI Review",
+              issues: [
+                (.comments[]? // [] | {
+                  file: .file,
+                  line: (.line // .position // 0),
+                  severity: (.severity // "info"),
+                  message: (.body // .message // .text),
+                  category: "ai-review"
+                })
+              ],
+              summary: (.summary // ""),
+              total_issues: (.issues_found // .issuesFound // (.comments | length) // 0)
+            }' > review-outputs/ai-review-issues.json || echo '{"source":"AI Review","issues":[],"total_issues":0}' > review-outputs/ai-review-issues.json
           else
-            echo "⚠️ No review response available to post"
-            
-            # Post a simple comment indicating review ran but no response
-            echo "## 🤖 AI Code Review\n\n⚠️ AI review service was contacted but did not return detailed feedback.\n\nThe service may still be processing or encountered an issue. Other code quality checks have completed.\n\n---\n*Powered by Centralized AI Review Service*" | \
-              gh pr comment ${{ github.event.pull_request.number }} --body-file - \
-              2>/dev/null || echo "Could not post comment"
+            echo '{"source":"AI Review","issues":[],"total_issues":0}' > review-outputs/ai-review-issues.json
           fi
+          
+          echo "✅ AI review results saved"
+
+      - name: Upload AI review results
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: review-results
+          path: review-outputs/
+          retention-days: 30
           
   ai-code-quality-check:
     runs-on: ubuntu-latest
@@ -267,6 +204,8 @@ jobs:
         run: |
           echo "🤖 Starting AI-powered code quality analysis..."
           
+          mkdir -p review-outputs
+          
           # Check for Python files in the PR
           git diff --name-only origin/${{ github.base_ref }}...HEAD | grep -E '\.py$' > changed_files.txt || true
           
@@ -279,16 +218,60 @@ jobs:
             
             echo ""
             echo "🔍 Running static analysis on changed Python files..."
+            echo '{"source":"Static Analysis","issues":[]}' > review-outputs/quality-issues.json
+            
             while IFS= read -r file; do
               if [ -f "$file" ]; then
                 echo "Analyzing: $file"
-                pylint "$file" --exit-zero || true
-                flake8 "$file" --exit-zero || true
+                
+                # Run pylint and capture output
+                pylint "$file" --output-format=json --exit-zero > pylint-output.json 2>&1 || true
+                
+                # Convert pylint output to standardized format
+                if [ -s pylint-output.json ]; then
+                  cat pylint-output.json | jq --arg file "$file" '[.[] | {
+                    file: $file,
+                    line: .line,
+                    severity: (if .type == "error" then "error" elif .type == "warning" then "warning" else "info" end),
+                    message: .message,
+                    category: "pylint",
+                    rule: .symbol
+                  }]' >> review-outputs/pylint-temp.json 2>/dev/null || true
+                fi
+                
+                # Run flake8
+                flake8 "$file" --format='{"file":"%(path)s","line":%(row)d,"column":%(col)d,"message":"%(text)s","code":"%(code)s"}' --exit-zero 2>/dev/null | \
+                  jq -s --arg file "$file" 'map({
+                    file: $file,
+                    line: .line,
+                    severity: "warning",
+                    message: .message,
+                    category: "flake8",
+                    rule: .code
+                  })' >> review-outputs/flake8-temp.json 2>/dev/null || true
               fi
             done < changed_files.txt
+            
+            # Merge all quality issues
+            jq -s '{
+              source: "Static Analysis",
+              issues: (.[].[] // []),
+              total_issues: ([].[] // [] | length)
+            }' review-outputs/*-temp.json 2>/dev/null > review-outputs/quality-issues.json || echo '{"source":"Static Analysis","issues":[],"total_issues":0}' > review-outputs/quality-issues.json
+            
+            rm -f review-outputs/*-temp.json pylint-output.json
           else
             echo "No Python files changed in this PR"
+            echo '{"source":"Static Analysis","issues":[],"total_issues":0}' > review-outputs/quality-issues.json
           fi
+
+      - name: Upload quality check results
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: review-results
+          path: review-outputs/
+          retention-days: 30
 
       - name: Check for common issues
         run: |
@@ -331,22 +314,47 @@ jobs:
         run: |
           echo "📊 Analyzing code complexity..."
           
+          mkdir -p review-outputs
+          
           # Check for Python files
           if find . -name "*.py" -not -path "./.git/*" -not -path "./venv/*" | grep -q .; then
             echo ""
             echo "Cyclomatic Complexity:"
-            radon cc . -a -nb || true
+            radon cc . -a -nb -j > review-outputs/complexity-cc.json || echo '[]' > review-outputs/complexity-cc.json
             
             echo ""
             echo "Maintainability Index:"
-            radon mi . -nb || true
+            radon mi . -nb -j > review-outputs/complexity-mi.json || echo '{}' > review-outputs/complexity-mi.json
             
-            echo ""
-            echo "Raw Metrics:"
-            radon raw . -s || true
+            # Convert to standardized format
+            cat review-outputs/complexity-cc.json | jq '{
+              source: "Complexity Analysis",
+              issues: [
+                .[][] | select(.complexity > 10) | {
+                  file: .name,
+                  line: .lineno,
+                  severity: (if .complexity > 20 then "error" elif .complexity > 15 then "warning" else "info" end),
+                  message: ("High cyclomatic complexity: " + (.complexity | tostring)),
+                  category: "complexity",
+                  complexity: .complexity
+                }
+              ],
+              total_issues: ([.[][] | select(.complexity > 10)] | length),
+              summary: "Complexity threshold: >10"
+            }' > review-outputs/complexity-issues.json || echo '{"source":"Complexity Analysis","issues":[],"total_issues":0}' > review-outputs/complexity-issues.json
+            
           else
             echo "No Python files found"
+            echo '{"source":"Complexity Analysis","issues":[],"total_issues":0}' > review-outputs/complexity-issues.json
           fi
+
+      - name: Upload complexity results
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: review-results
+          path: review-outputs/
+          retention-days: 30
 
   ai-security-scan:
     runs-on: ubuntu-latest
@@ -360,9 +368,44 @@ jobs:
         with:
           scan-type: 'fs'
           scan-ref: '.'
-          format: 'table'
+          format: 'json'
+          output: 'trivy-results.json'
           exit-code: '0'
-          severity: 'CRITICAL,HIGH'
+          severity: 'CRITICAL,HIGH,MEDIUM'
+
+      - name: Process security scan results
+        if: always()
+        run: |
+          mkdir -p review-outputs
+          
+          # Process Trivy results
+          if [ -f trivy-results.json ]; then
+            cat trivy-results.json | jq '{
+              source: "Security Scan",
+              issues: [
+                .Results[]?.Vulnerabilities[]? // [] | {
+                  file: (.PkgName // "dependency"),
+                  line: 0,
+                  severity: (if .Severity == "CRITICAL" then "critical" elif .Severity == "HIGH" then "error" else "warning" end),
+                  message: (.Title + " (" + .VulnerabilityID + ")"),
+                  category: "security",
+                  cve: .VulnerabilityID,
+                  package: .PkgName
+                }
+              ],
+              total_issues: ([.Results[]?.Vulnerabilities[]? // []] | length)
+            }' > review-outputs/security-issues.json || echo '{"source":"Security Scan","issues":[],"total_issues":0}' > review-outputs/security-issues.json
+          else
+            echo '{"source":"Security Scan","issues":[],"total_issues":0}' > review-outputs/security-issues.json
+          fi
+
+      - name: Upload security scan results
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: review-results
+          path: review-outputs/
+          retention-days: 30
 
       - name: Check Docker files
         run: |
@@ -385,3 +428,278 @@ jobs:
           else
             echo "No Dockerfiles found"
           fi
+
+  aggregate-review-results:
+    runs-on: ubuntu-latest
+    name: Aggregate Review Results
+    needs: [ai-code-review, ai-code-quality-check, python-code-complexity, ai-security-scan]
+    if: always()
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download all review results
+        uses: actions/download-artifact@v3
+        with:
+          name: review-results
+          path: review-outputs/
+
+      - name: Aggregate all issues
+        run: |
+          echo "📊 Aggregating review results from all jobs..."
+          
+          # Merge all JSON files
+          jq -s '{
+            pr_number: ${{ github.event.pull_request.number }},
+            pr_title: "${{ github.event.pull_request.title }}",
+            repository: "${{ github.repository }}",
+            timestamp: (now | todateiso8601),
+            all_sources: map(.source),
+            total_issues: (map(.total_issues // 0) | add),
+            issues_by_severity: {
+              critical: ([.[].issues[] | select(.severity == "critical")] | length),
+              error: ([.[].issues[] | select(.severity == "error")] | length),
+              warning: ([.[].issues[] | select(.severity == "warning")] | length),
+              info: ([.[].issues[] | select(.severity == "info" or .severity == "suggestion")] | length)
+            },
+            issues_by_source: [
+              .[] | {
+                source: .source,
+                count: (.total_issues // 0),
+                issues: .issues
+              }
+            ],
+            all_issues: [.[].issues[]]
+          }' review-outputs/*-issues.json > aggregated-results.json
+          
+          echo "✅ Aggregation complete"
+          echo "📈 Summary:"
+          cat aggregated-results.json | jq '{
+            total_issues,
+            issues_by_severity,
+            sources: .all_sources
+          }'
+
+      - name: Generate review report
+        run: |
+          echo "📝 Generating comprehensive review report..."
+          
+          cat > review-report.md << 'REPORT_EOF'
+          # 🤖 Comprehensive Code Review Report
+          
+          **PR:** #${{ github.event.pull_request.number }} - ${{ github.event.pull_request.title }}
+          **Repository:** ${{ github.repository }}
+          **Author:** @${{ github.event.pull_request.user.login }}
+          **Date:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+          
+          ---
+          
+          ## 📊 Executive Summary
+          
+          REPORT_EOF
+          
+          # Add summary statistics
+          jq -r '
+            "**Total Issues Found:** " + (.total_issues | tostring) + "\n" +
+            "\n### Issues by Severity\n\n" +
+            "| Severity | Count |\n" +
+            "|----------|-------|\n" +
+            "| 🚨 Critical | " + (.issues_by_severity.critical | tostring) + " |\n" +
+            "| ❌ Error | " + (.issues_by_severity.error | tostring) + " |\n" +
+            "| ⚠️  Warning | " + (.issues_by_severity.warning | tostring) + " |\n" +
+            "| 💡 Info/Suggestion | " + (.issues_by_severity.info | tostring) + " |\n" +
+            "\n### Issues by Source\n\n" +
+            "| Source | Count |\n" +
+            "|--------|-------|\n" +
+            (.issues_by_source[] | "| " + .source + " | " + (.count | tostring) + " |") + "\n"
+          ' aggregated-results.json >> review-report.md
+          
+          # Add detailed issues section
+          cat >> review-report.md << 'REPORT_EOF'
+          
+          ---
+          
+          ## 📋 Detailed Issues
+          
+          REPORT_EOF
+          
+          # Generate detailed issue list by severity
+          for severity in critical error warning info; do
+            count=$(jq -r ".issues_by_severity.$severity" aggregated-results.json)
+            if [ "$count" -gt 0 ]; then
+              case $severity in
+                critical) emoji="🚨"; label="Critical Issues" ;;
+                error) emoji="❌"; label="Errors" ;;
+                warning) emoji="⚠️ "; label="Warnings" ;;
+                info) emoji="💡"; label="Info & Suggestions" ;;
+              esac
+              
+              echo "" >> review-report.md
+              echo "### $emoji $label ($count)" >> review-report.md
+              echo "" >> review-report.md
+              
+              jq -r --arg sev "$severity" '
+                .all_issues | 
+                map(select(.severity == $sev or ($sev == "info" and .severity == "suggestion"))) | 
+                group_by(.category) | 
+                .[] | 
+                "\n#### " + (.[0].category | ascii_upcase) + "\n" +
+                (
+                  .[] | 
+                  "- **" + (.file // "N/A") + 
+                  (if .line > 0 then ":" + (.line | tostring) else "" end) + 
+                  "**\n  " + .message + 
+                  (if .rule then " `[" + .rule + "]`" else "" end) + "\n"
+                )
+              ' aggregated-results.json >> review-report.md
+            fi
+          done
+          
+          # Add footer
+          cat >> review-report.md << 'REPORT_EOF'
+          
+          ---
+          
+          ## 🔍 Review Tools Used
+          
+          - **AI Code Review**: Centralized AI review service
+          - **Static Analysis**: Pylint & Flake8
+          - **Complexity Analysis**: Radon
+          - **Security Scanning**: Trivy
+          
+          *Report generated automatically by CI/CD pipeline*
+          REPORT_EOF
+          
+          echo "✅ Review report generated"
+
+      - name: Post comprehensive review to PR
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "💬 Posting comprehensive review to PR..."
+          
+          # Create PR comment with summary and link to full report
+          TOTAL_ISSUES=$(jq -r '.total_issues' aggregated-results.json)
+          CRITICAL=$(jq -r '.issues_by_severity.critical' aggregated-results.json)
+          ERRORS=$(jq -r '.issues_by_severity.error' aggregated-results.json)
+          WARNINGS=$(jq -r '.issues_by_severity.warning' aggregated-results.json)
+          INFO=$(jq -r '.issues_by_severity.info' aggregated-results.json)
+          
+          cat > pr-comment.md << 'COMMENT_EOF'
+          ## 🤖 Comprehensive Code Review
+          
+          COMMENT_EOF
+          
+          if [ "$TOTAL_ISSUES" -eq 0 ]; then
+            echo "✅ **Excellent!** No issues found in this review." >> pr-comment.md
+            echo "" >> pr-comment.md
+            echo "All automated checks passed successfully! 🎉" >> pr-comment.md
+          else
+            cat >> pr-comment.md << COMMENT_EOF
+          **Total Issues:** $TOTAL_ISSUES
+          
+          ### 📊 Issues Breakdown
+          
+          | Severity | Count | Status |
+          |----------|-------|--------|
+          | 🚨 Critical | $CRITICAL | $([ $CRITICAL -gt 0 ] && echo "❌ Must fix" || echo "✅") |
+          | ❌ Error | $ERRORS | $([ $ERRORS -gt 0 ] && echo "⚠️  Should fix" || echo "✅") |
+          | ⚠️  Warning | $WARNINGS | $([ $WARNINGS -gt 0 ] && echo "⚡ Review recommended" || echo "✅") |
+          | 💡 Info | $INFO | $([ $INFO -gt 0 ] && echo "📝 Optional improvements" || echo "✅") |
+          
+          ### 🔍 Top Issues by Category
+          
+          COMMENT_EOF
+            
+            # Add top 10 issues
+            jq -r '
+              .all_issues | 
+              sort_by(.severity) | 
+              reverse | 
+              .[0:10] | 
+              .[] | 
+              "- " + 
+              (if .severity == "critical" then "🚨" 
+               elif .severity == "error" then "❌" 
+               elif .severity == "warning" then "⚠️ " 
+               else "💡" end) + 
+              " **" + (.file // "N/A") + 
+              (if .line > 0 then ":" + (.line | tostring) else "" end) + 
+              "** - " + (.message | split("\n")[0])
+            ' aggregated-results.json >> pr-comment.md
+            
+            if [ "$TOTAL_ISSUES" -gt 10 ]; then
+              echo "" >> pr-comment.md
+              echo "_...and $((TOTAL_ISSUES - 10)) more issues. Download the full report for details._" >> pr-comment.md
+            fi
+          fi
+          
+          cat >> pr-comment.md << 'COMMENT_EOF'
+          
+          ---
+          
+          ### 📥 Full Report Available
+          
+          Download the complete review report from the **Actions artifacts** for detailed information on all findings.
+          
+          **Review Sources:**
+          COMMENT_EOF
+          
+          jq -r '.issues_by_source[] | "- ✓ " + .source + " (" + (.count | tostring) + " issues)"' aggregated-results.json >> pr-comment.md
+          
+          echo "" >> pr-comment.md
+          echo "*💡 Tip: Review the detailed report artifact for code-specific recommendations and improvement suggestions.*" >> pr-comment.md
+          echo "" >> pr-comment.md
+          echo "---" >> pr-comment.md
+          echo "*🔗 Powered by Centralized AI Review Service | [View Workflow Run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})*" >> pr-comment.md
+          
+          # Post comment to PR
+          gh pr comment ${{ github.event.pull_request.number }} --body-file pr-comment.md
+          
+          echo "✅ Comprehensive review posted to PR"
+
+      - name: Upload review report as artifact
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: code-review-report
+          path: |
+            review-report.md
+            aggregated-results.json
+          retention-days: 90
+
+      - name: Save metrics for analytics
+        if: always()
+        run: |
+          echo "📈 Saving metrics for analytics dashboard..."
+          
+          # Create metrics file
+          jq '{
+            timestamp: .timestamp,
+            pr_number: .pr_number,
+            repository: .repository,
+            total_issues: .total_issues,
+            critical: .issues_by_severity.critical,
+            errors: .issues_by_severity.error,
+            warnings: .issues_by_severity.warning,
+            info: .issues_by_severity.info,
+            by_source: .issues_by_source
+          }' aggregated-results.json > metrics.json
+          
+          # In a real setup, this would be sent to a metrics store
+          # For now, we'll save it as an artifact
+          mkdir -p metrics-data
+          cp metrics.json "metrics-data/metrics-pr-${{ github.event.pull_request.number }}-$(date +%s).json"
+          
+          echo "✅ Metrics saved"
+
+      - name: Upload metrics data
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: review-metrics
+          path: metrics-data/
+          retention-days: 365

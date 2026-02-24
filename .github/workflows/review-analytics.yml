@@ -1,0 +1,432 @@
+name: Review Analytics Dashboard
+
+on:
+  workflow_run:
+    workflows: ["AI Code Review"]
+    types:
+      - completed
+  schedule:
+    # Generate dashboard weekly on Mondays at 00:00 UTC
+    - cron: '0 0 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  generate-analytics:
+    runs-on: ubuntu-latest
+    name: Generate Review Analytics Dashboard
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          pip install pandas plotly jinja2 requests
+
+      - name: Download historical metrics
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "📥 Downloading historical review metrics..."
+          
+          mkdir -p analytics-data
+          
+          # Download metrics from recent workflow runs
+          # This retrieves artifacts from the last 50 workflow runs
+          gh api \
+            -H "Accept: application/vnd.github+json" \
+            "/repos/${{ github.repository }}/actions/workflows/ai-code-review.yml/runs?per_page=50" \
+            | jq -r '.workflow_runs[].id' > workflow_runs.txt
+          
+          # Download review-metrics artifacts from each run
+          while read -r run_id; do
+            echo "Checking run: $run_id"
+            
+            # Get artifacts for this run
+            gh api \
+              -H "Accept: application/vnd.github+json" \
+              "/repos/${{ github.repository }}/actions/runs/$run_id/artifacts" \
+              | jq -r '.artifacts[] | select(.name == "review-metrics") | .id' | while read -r artifact_id; do
+                echo "  Downloading artifact: $artifact_id"
+                
+                # Download and extract artifact
+                gh api \
+                  -H "Accept: application/vnd.github+json" \
+                  "/repos/${{ github.repository }}/actions/artifacts/$artifact_id/zip" > "artifact-$artifact_id.zip" || true
+                
+                if [ -f "artifact-$artifact_id.zip" ]; then
+                  unzip -q -o "artifact-$artifact_id.zip" -d analytics-data/ 2>/dev/null || true
+                  rm "artifact-$artifact_id.zip"
+                fi
+              done
+          done < workflow_runs.txt
+          
+          # Count collected metrics
+          METRICS_COUNT=$(find analytics-data -name "metrics-pr-*.json" 2>/dev/null | wc -l)
+          echo "✅ Downloaded $METRICS_COUNT metrics files"
+
+      - name: Generate analytics dashboard
+        run: |
+          echo "📊 Generating analytics dashboard..."
+          
+          cat > generate_dashboard.py << 'PYTHON_EOF'
+          import json
+          import os
+          from datetime import datetime
+          import pandas as pd
+          import plotly.graph_objects as go
+          import plotly.express as px
+          from plotly.subplots import make_subplots
+
+          # Load all metrics files
+          metrics_files = []
+          for root, dirs, files in os.walk('analytics-data'):
+              for file in files:
+                  if file.startswith('metrics-pr-') and file.endswith('.json'):
+                      metrics_files.append(os.path.join(root, file))
+
+          print(f"📁 Found {len(metrics_files)} metrics files")
+
+          if not metrics_files:
+              print("⚠️  No metrics data available yet. Run some code reviews first!")
+              # Create empty dashboard
+              with open('analytics/review-dashboard.html', 'w') as f:
+                  f.write("""
+                  <!DOCTYPE html>
+                  <html>
+                  <head><title>Review Analytics Dashboard</title></head>
+                  <body>
+                      <h1>📊 Code Review Analytics Dashboard</h1>
+                      <p>No data available yet. This dashboard will be populated after code reviews are completed.</p>
+                      <p>Run some pull requests to see analytics here!</p>
+                  </body>
+                  </html>
+                  """)
+              exit(0)
+
+          # Load and parse metrics
+          metrics_data = []
+          for file_path in metrics_files:
+              try:
+                  with open(file_path, 'r') as f:
+                      data = json.load(f)
+                      metrics_data.append(data)
+              except Exception as e:
+                  print(f"⚠️  Error loading {file_path}: {e}")
+
+          # Convert to DataFrame
+          df = pd.DataFrame(metrics_data)
+          
+          # Convert timestamp to datetime
+          df['timestamp'] = pd.to_datetime(df['timestamp'])
+          df = df.sort_values('timestamp')
+
+          print(f"📈 Loaded {len(df)} review records")
+
+          # Create subplots
+          fig = make_subplots(
+              rows=4, cols=2,
+              subplot_titles=(
+                  'Total Issues Over Time',
+                  'Issues by Severity',
+                  'Issues by Source',
+                  'Critical Issues Trend',
+                  'Average Issues per PR',
+                  'Review Quality Score',
+                  'Top Issue Categories',
+                  'Weekly Review Activity'
+              ),
+              specs=[
+                  [{"secondary_y": False}, {"type": "pie"}],
+                  [{"type": "bar"}, {"secondary_y": False}],
+                  [{"secondary_y": False}, {"secondary_y": False}],
+                  [{"type": "bar"}, {"secondary_y": False}]
+              ],
+              vertical_spacing=0.12,
+              horizontal_spacing=0.15
+          )
+
+          # 1. Total Issues Over Time
+          fig.add_trace(
+              go.Scatter(
+                  x=df['timestamp'],
+                  y=df['total_issues'],
+                  mode='lines+markers',
+                  name='Total Issues',
+                  line=dict(color='#FF6B6B', width=2),
+                  marker=dict(size=8)
+              ),
+              row=1, col=1
+          )
+
+          # 2. Issues by Severity (Pie)
+          severity_totals = {
+              'Critical': df['critical'].sum(),
+              'Errors': df['errors'].sum(),
+              'Warnings': df['warnings'].sum(),
+              'Info': df['info'].sum()
+          }
+          fig.add_trace(
+              go.Pie(
+                  labels=list(severity_totals.keys()),
+                  values=list(severity_totals.values()),
+                  marker=dict(colors=['#FF3B3B', '#FF6B6B', '#FFA500', '#4ECDC4'])
+              ),
+              row=1, col=2
+          )
+
+          # 3. Issues by Source (Stacked Bar)
+          if 'by_source' in df.columns and len(df) > 0:
+              sources_df = pd.json_normalize(df['by_source'].explode().tolist())
+              if not sources_df.empty and 'source' in sources_df.columns:
+                  source_counts = sources_df.groupby('source')['count'].sum().sort_values(ascending=True)
+                  
+                  fig.add_trace(
+                      go.Bar(
+                          y=source_counts.index,
+                          x=source_counts.values,
+                          orientation='h',
+                          marker=dict(color='#4ECDC4')
+                      ),
+                      row=2, col=1
+                  )
+
+          # 4. Critical Issues Trend
+          fig.add_trace(
+              go.Scatter(
+                  x=df['timestamp'],
+                  y=df['critical'],
+                  mode='lines+markers',
+                  name='Critical',
+                  line=dict(color='#FF3B3B', width=2),
+                  fill='tozeroy',
+                  marker=dict(size=6)
+              ),
+              row=2, col=2
+          )
+
+          # 5. Average Issues per PR
+          df['week'] = df['timestamp'].dt.to_period('W').astype(str)
+          weekly_avg = df.groupby('week')['total_issues'].mean()
+          
+          fig.add_trace(
+              go.Bar(
+                  x=weekly_avg.index,
+                  y=weekly_avg.values,
+                  marker=dict(color='#95E1D3')
+              ),
+              row=3, col=1
+          )
+
+          # 6. Review Quality Score (fewer issues = better score)
+          max_issues = df['total_issues'].max() if df['total_issues'].max() > 0 else 1
+          df['quality_score'] = 100 - (df['total_issues'] / max_issues * 100)
+          
+          fig.add_trace(
+              go.Scatter(
+                  x=df['timestamp'],
+                  y=df['quality_score'],
+                  mode='lines+markers',
+                  name='Quality Score',
+                  line=dict(color='#38B6FF', width=2),
+                  marker=dict(size=8)
+              ),
+              row=3, col=2
+          )
+
+          # 7. Top Issue Categories
+          category_counts = {
+              'AI Review': df['by_source'].apply(lambda x: next((s['count'] for s in x if s['source'] == 'AI Review'), 0)).sum(),
+              'Static Analysis': df['by_source'].apply(lambda x: next((s['count'] for s in x if s['source'] == 'Static Analysis'), 0)).sum(),
+              'Complexity': df['by_source'].apply(lambda x: next((s['count'] for s in x if s['source'] == 'Complexity Analysis'), 0)).sum(),
+              'Security': df['by_source'].apply(lambda x: next((s['count'] for s in x if s['source'] == 'Security Scan'), 0)).sum()
+          }
+          
+          fig.add_trace(
+              go.Bar(
+                  x=list(category_counts.keys()),
+                  y=list(category_counts.values()),
+                  marker=dict(color=['#FF6B6B', '#4ECDC4', '#FFA500', '#FF3B3B'])
+              ),
+              row=4, col=1
+          )
+
+          # 8. Weekly Review Activity
+          weekly_count = df.groupby('week').size()
+          
+          fig.add_trace(
+              go.Scatter(
+                  x=weekly_count.index,
+                  y=weekly_count.values,
+                  mode='lines+markers',
+                  name='Reviews per Week',
+                  line=dict(color='#9B59B6', width=2),
+                  marker=dict(size=10)
+              ),
+              row=4, col=2
+          )
+
+          # Update layout
+          fig.update_layout(
+              title_text="📊 Code Review Analytics Dashboard",
+              title_font_size=24,
+              showlegend=False,
+              height=1800,
+              template='plotly_white'
+          )
+
+          # Update axes labels
+          fig.update_xaxes(title_text="Date", row=1, col=1)
+          fig.update_yaxes(title_text="Issues", row=1, col=1)
+          fig.update_xaxes(title_text="Count", row=2, col=1)
+          fig.update_xaxes(title_text="Date", row=2, col=2)
+          fig.update_yaxes(title_text="Critical Issues", row=2, col=2)
+          fig.update_xaxes(title_text="Week", row=3, col=1)
+          fig.update_yaxes(title_text="Avg Issues", row=3, col=1)
+          fig.update_xaxes(title_text="Date", row=3, col=2)
+          fig.update_yaxes(title_text="Score (0-100)", row=3, col=2)
+          fig.update_xaxes(title_text="Category", row=4, col=1)
+          fig.update_yaxes(title_text="Total Issues", row=4, col=1)
+          fig.update_xaxes(title_text="Week", row=4, col=2)
+          fig.update_yaxes(title_text="Review Count", row=4, col=2)
+
+          # Save dashboard
+          os.makedirs('analytics', exist_ok=True)
+          
+          # Create comprehensive HTML with stats
+          stats_html = f"""
+          <!DOCTYPE html>
+          <html>
+          <head>
+              <meta charset="UTF-8">
+              <title>Review Analytics Dashboard</title>
+              <style>
+                  body {{ font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }}
+                  .container {{ max-width: 1400px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; }}
+                  .header {{ text-align: center; margin-bottom: 30px; }}
+                  .stats-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-bottom: 30px; }}
+                  .stat-card {{ background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; border-radius: 8px; text-align: center; }}
+                  .stat-value {{ font-size: 2.5em; font-weight: bold; margin: 10px 0; }}
+                  .stat-label {{ font-size: 0.9em; opacity: 0.9; }}
+                  .chart {{ margin: 20px 0; }}
+                  .info-box {{ background: #e8f4f8; border-left: 4px solid #2196F3; padding: 15px; margin: 20px 0; }}
+              </style>
+          </head>
+          <body>
+              <div class="container">
+                  <div class="header">
+                      <h1>📊 Code Review Analytics Dashboard</h1>
+                      <p>Repository: {df['repository'].iloc[0] if len(df) > 0 else 'N/A'}</p>
+                      <p>Last Updated: {datetime.now().strftime('%Y-%m-%d %H:%M UTC')}</p>
+                  </div>
+                  
+                  <div class="stats-grid">
+                      <div class="stat-card">
+                          <div class="stat-label">Total Reviews</div>
+                          <div class="stat-value">{len(df)}</div>
+                      </div>
+                      <div class="stat-card" style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);">
+                          <div class="stat-label">Total Issues</div>
+                          <div class="stat-value">{df['total_issues'].sum()}</div>
+                      </div>
+                      <div class="stat-card" style="background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);">
+                          <div class="stat-label">Avg Issues/PR</div>
+                          <div class="stat-value">{df['total_issues'].mean():.1f}</div>
+                      </div>
+                      <div class="stat-card" style="background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);">
+                          <div class="stat-label">Quality Score</div>
+                          <div class="stat-value">{df['quality_score'].mean():.0f}%</div>
+                      </div>
+                  </div>
+                  
+                  <div class="info-box">
+                      <strong>📌 Key Insights:</strong>
+                      <ul>
+                          <li>Critical Issues: {df['critical'].sum()} total ({df['critical'].mean():.1f} avg per PR)</li>
+                          <li>Most Active Week: {weekly_count.idxmax() if len(weekly_count) > 0 else 'N/A'} ({weekly_count.max() if len(weekly_count) > 0 else 0} reviews)</li>
+                          <li>Best Quality PR: #{df.loc[df['quality_score'].idxmax(), 'pr_number'] if len(df) > 0 else 'N/A'} (Score: {df['quality_score'].max():.0f}%)</li>
+                      </ul>
+                  </div>
+                  
+                  <div class="chart">
+                      {fig.to_html(include_plotlyjs='cdn', full_html=False)}
+                  </div>
+                  
+                  <div class="info-box">
+                      <strong>ℹ️ About This Dashboard:</strong>
+                      <p>This dashboard is automatically generated from code review metrics collected during CI/CD runs. 
+                      It provides insights into code quality trends, issue patterns, and review effectiveness over time.</p>
+                      <p><strong>Data Retention:</strong> Metrics are retained for 365 days.</p>
+                  </div>
+              </div>
+          </body>
+          </html>
+          """
+          
+          with open('analytics/review-dashboard.html', 'w') as f:
+              f.write(stats_html)
+          
+          # Also save as JSON for API access
+          summary_stats = {
+              'total_reviews': len(df),
+              'total_issues': int(df['total_issues'].sum()),
+              'avg_issues_per_pr': float(df['total_issues'].mean()),
+              'avg_quality_score': float(df['quality_score'].mean()),
+              'severity_breakdown': {
+                  'critical': int(df['critical'].sum()),
+                  'errors': int(df['errors'].sum()),
+                  'warnings': int(df['warnings'].sum()),
+                  'info': int(df['info'].sum())
+              },
+              'last_updated': datetime.now().isoformat()
+          }
+          
+          with open('analytics/review-stats.json', 'w') as f:
+              json.dump(summary_stats, f, indent=2)
+          
+          print("✅ Dashboard generated successfully!")
+
+          PYTHON_EOF
+          
+          python generate_dashboard.py
+
+      - name: Commit and push dashboard
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # Create analytics directory if it doesn't exist
+          mkdir -p analytics
+          
+          # Add and commit if there are changes
+          git add analytics/ || true
+          
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Update review analytics dashboard [skip ci]"
+            git push
+            echo "✅ Dashboard updated and pushed"
+          fi
+
+      - name: Upload dashboard artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: review-analytics-dashboard
+          path: analytics/
+          retention-days: 90
+
+      - name: Post dashboard link
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          echo "📊 Analytics dashboard has been generated!"
+          echo "View it at: ${{ github.server_url }}/${{ github.repository }}/blob/main/analytics/review-dashboard.html"
+          echo "Or download from artifacts: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"

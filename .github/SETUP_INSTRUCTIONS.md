@@ -237,6 +237,125 @@ Once configured, the AI code review will:
 
 ---
 
+---
+
+## 📊 New Features: Comprehensive Reports & Analytics
+
+After setup, you'll have access to powerful reporting and analytics features:
+
+### 1. Comprehensive PR Comments
+
+Every PR receives a **unified review comment** aggregating findings from all tools:
+
+**What you'll see:**
+- 📊 Total issue count
+- 🚨 Breakdown by severity (Critical, Error, Warning, Info)
+- 📋 Top issues with file locations
+- ✅ Status indicators for each category
+- 🔗 Links to full report and workflow
+
+**Example:**
+```
+## 🤖 Comprehensive Code Review
+
+**Total Issues:** 15
+
+### 📊 Issues Breakdown
+| Severity | Count | Status |
+|----------|-------|--------|
+| 🚨 Critical | 2 | ❌ Must fix |
+| ❌ Error | 5 | ⚠️  Should fix |
+| ⚠️  Warning | 6 | ⚡ Review recommended |
+| 💡 Info | 2 | 📝 Optional improvements |
+```
+
+### 2. Downloadable Review Reports
+
+After each review, download a **detailed markdown report**:
+
+**Report includes:**
+- Executive summary with metrics
+- Detailed issue list organized by severity
+- Issues grouped by category and source
+- File locations and line numbers
+- Review tool information
+
+**How to access:**
+1. Go to PR → **Checks** tab
+2. Click **AI Code Review** workflow
+3. Scroll to **Artifacts** section  
+4. Download **code-review-report** artifact
+5. Extract and open `review-report.md`
+
+**Retention:** Reports kept for 90 days
+
+### 3. Analytics Dashboard
+
+Track code quality trends with an **interactive analytics dashboard**:
+
+**Location:** `/analytics/review-dashboard.html` in repository
+
+**Dashboard features:**
+- 📈 8 interactive charts showing trends
+- 📊 Key metrics cards (Total Reviews, Avg Issues, Quality Score)
+- 🔍 Automatically generated insights
+- 📉 Weekly aggregated data
+- 📈 Quality score tracking (0-100)
+
+**Charts included:**
+1. Total Issues Over Time
+2. Issues by Severity (pie chart)
+3. Issues by Source (bar chart)
+4. Critical Issues Trend
+5. Average Issues per PR (weekly)
+6. Review Quality Score
+7. Top Issue Categories
+8. Weekly Review Activity
+
+**Update frequency:**
+- ✅ After each PR review (data collection)
+- ✅ Weekly rebuild (Mondays 00:00 UTC)
+- ✅ Manual trigger via Actions → Review Analytics Dashboard
+
+**How to view:**
+1. Navigate to `/analytics` folder in repository
+2. Download `review-dashboard.html`
+3. Open in browser (works offline, all data embedded)
+
+Or view directly if GitHub Pages is enabled:
+```
+https://<username>.github.io/<repo>/analytics/review-dashboard.html
+```
+
+### What Gets Aggregated
+
+All findings from these sources:
+- ✅ **AI Code Review** - Centralized AI service
+- ✅ **Static Analysis** - Pylint & Flake8
+- ✅ **Complexity Analysis** - Radon (cyclomatic complexity)
+- ✅ **Security Scanning** - Trivy (vulnerabilities)
+
+### Benefits
+
+**For Developers:**
+- See all issues in one place
+- Understand severity and priority
+- Track your improvement over time
+- Learn from high-quality PRs
+
+**For Teams:**
+- Monitor code quality trends
+- Identify training opportunities
+- Celebrate improvements
+- Data-driven process decisions
+
+### Learn More
+
+📖 **Comprehensive guide:** [COMPREHENSIVE_REPORTS_GUIDE.md](COMPREHENSIVE_REPORTS_GUIDE.md)
+📊 **Dashboard docs:** [/analytics/README.md](../analytics/README.md)
+
+---
+
 ## Support
 
 ### Need help?

@@ -131,12 +131,30 @@ The AI code review workflow will automatically run on:
 
 ### How It Works
 
-The AI code review workflow consists of four jobs:
+The AI code review workflow consists of **five jobs**:
 
 1. **ai-code-review**: Sends code changes to centralized AI review server, which analyzes the code and returns review comments
 2. **ai-code-quality-check**: Python-specific quality analysis with pylint and flake8
 3. **python-code-complexity**: Analyzes cyclomatic complexity and maintainability metrics
 4. **ai-security-scan**: Scans for security vulnerabilities and checks Docker best practices
+5. **aggregate-review-results**: Combines all findings into comprehensive report and PR comment
+
+### 📊 Review Reports & Analytics
+
+Each PR receives:
+
+- **📝 Comprehensive PR Comment** - Aggregated findings from all review tools with severity breakdown
+- **📥 Downloadable Report** - Detailed markdown report available as workflow artifact (90 days retention)
+- **📈 Analytics Dashboard** - Interactive dashboard tracking code quality trends at [`/analytics/review-dashboard.html`](analytics/README.md)
+
+**What's included in reports:**
+- Total issues by severity (Critical, Error, Warning, Info)
+- Detailed issue list with file locations and line numbers
+- Issues grouped by source (AI Review, Static Analysis, Complexity, Security)
+- Executive summary and key metrics
+
+**View the Analytics Dashboard:**
+Navigate to [`/analytics`](analytics/README.md) folder to see code quality trends, issue patterns, and review metrics over time.
 
 For detailed documentation, see [.github/workflows/README.md](.github/workflows/README.md).
 
@@ -147,6 +165,8 @@ For detailed documentation, see [.github/workflows/README.md](.github/workflows/
 - ✅ **Managed Updates**: AI models and prompts managed centrally
 - ✅ **Better Performance**: Optimized infrastructure for fast reviews
 - ✅ **Enterprise Features**: Advanced security and compliance features
+- ✅ **Comprehensive Reporting**: Aggregated findings from all review tools
+- ✅ **Analytics & Metrics**: Track code quality trends over time
 
 ## Writing pipelines
 

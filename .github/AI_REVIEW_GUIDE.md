@@ -1,4 +1,4 @@
-# AI Code Review - Quick Reference Guide - New1
+# AI Code Review - Quick Reference Guide
 
 ## Overview
 
@@ -12,10 +12,57 @@ This repository uses an automated AI-powered code review system that connects to
 - ✅ Consistent review standards across all teams
 - ✅ Enterprise-grade AI models and infrastructure
 - ✅ Managed updates and improvements
+- ✅ **Comprehensive issue tracking and reporting**
+- ✅ **Analytics dashboard for metrics tracking**
 
 **Required Setup:**
 - Add `AI_REVIEW_ACCESS_TOKEN` secret to your repository
 - Obtain token from your admin team
+
+## 📊 New Features
+
+### Comprehensive Review Reports
+
+Every PR now receives:
+
+1. **Aggregated Issue List** - All findings from all tools in one place:
+   - AI Review findings
+   - Static analysis (Pylint/Flake8)
+   - Complexity issues (Radon)
+   - Security vulnerabilities (Trivy)
+
+2. **Downloadable Report** - Complete review report available as workflow artifact:
+   - Detailed issue breakdown by severity
+   - Issues organized by category and source
+   - Executive summary with metrics
+   - Available for 90 days
+
+3. **Analytics Dashboard** - Track code quality over time:
+   - View trends and patterns at `/analytics/review-dashboard.html`
+   - Monitor quality scores
+   - Compare PR performance
+   - Identify improvement areas
+
+### How to Access Reports
+
+#### PR Comments
+After each review, a comprehensive comment is posted with:
+- Total issues found
+- Breakdown by severity (🚨 Critical, ❌ Error, ⚠️  Warning, 💡 Info)
+- Top issues with file locations
+- Link to full report
+
+#### Full Report Download
+1. Go to the PR's **Checks** tab
+2. Click on **AI Code Review** workflow
+3. Scroll to **Artifacts** section
+4. Download **code-review-report** artifact
+5. Extract and open `review-report.md`
+
+#### Analytics Dashboard
+1. Navigate to `/analytics/review-dashboard.html` in the repository
+2. Or download from **Actions** → **Review Analytics Dashboard** → **Artifacts**
+3. Open HTML file in your browser for interactive visualizations
 
 ## What Gets Checked?
 
