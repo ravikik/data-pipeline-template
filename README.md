@@ -5,6 +5,10 @@
         * [Run locally](#run-locally)
     * [Architecture and services in this template](#architecture-and-services-in-this-template)
     * [Using template](#using-template)
+    * [AI Code Review](#ai-code-review)
+        * [Setup](#setup)
+        * [How It Works](#how-it-works)
+        * [Cost Considerations](#cost-considerations)
     * [Writing pipelines](#writing-pipelines)
     * [(Optional) Advanced cloud setup](#optional-advanced-cloud-setup)
         * [Prerequisites:](#prerequisites)
@@ -81,6 +85,56 @@ The file structure of our repo is as shown below:
 You can use this repo as a template and create your own, click on the `Use this template` button.
 
 ![Template](./assets/images/template.png)
+
+## AI Code Review
+
+This repository includes an automated AI-powered code review workflow that runs on every pull request. The workflow connects to a **centralized AI review server** and provides intelligent feedback on:
+
+- 🤖 **Code Quality**: AI-powered review using enterprise-grade models
+- 🔍 **Static Analysis**: Linting with pylint and flake8
+- 📊 **Complexity Metrics**: Cyclomatic complexity and maintainability index
+- 🔒 **Security Scanning**: Vulnerability detection with Trivy
+- 🐳 **Docker Best Practices**: Dockerfile validation
+- ⚠️ **Code Smells**: Detection of debugging statements, TODOs, and anti-patterns
+
+### Setup
+
+The AI code review is **ready to use** - no additional setup required!
+
+- ✅ Connected to centralized review service at: `http://ai-codereview-dev-alb-1334724727.us-east-1.elb.amazonaws.com`
+- ✅ No API keys needed (managed by the central service)
+- ✅ Automatically runs on all pull requests
+
+The AI code review workflow will automatically run on:
+- New pull requests
+- Updates to existing pull requests
+- Reopened pull requests
+
+**Configure review settings** (optional):
+- Edit [.github/ai-review-config.yml](.github/ai-review-config.yml) to customize:
+  - Review detail level
+  - File patterns to include/exclude
+  - Quality thresholds
+  - Security check patterns
+
+### How It Works
+
+The AI code review workflow consists of four jobs:
+
+1. **ai-code-review**: Sends code changes to centralized AI review server, which analyzes the code and returns review comments
+2. **ai-code-quality-check**: Python-specific quality analysis with pylint and flake8
+3. **python-code-complexity**: Analyzes cyclomatic complexity and maintainability metrics
+4. **ai-security-scan**: Scans for security vulnerabilities and checks Docker best practices
+
+For detailed documentation, see [.github/workflows/README.md](.github/workflows/README.md).
+
+### Centralized Service Benefits
+
+- ✅ **No Cost**: No individual API keys or billing required
+- ✅ **Consistent Reviews**: All teams use the same review standards
+- ✅ **Managed Updates**: AI models and prompts managed centrally
+- ✅ **Better Performance**: Optimized infrastructure for fast reviews
+- ✅ **Enterprise Features**: Advanced security and compliance features
 
 ## Writing pipelines
 

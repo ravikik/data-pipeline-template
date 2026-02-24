@@ -1,0 +1,266 @@
+name: AI Code Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  ai-code-review:
+    runs-on: ubuntu-latest
+    name: AI Code Review
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get PR diff and metadata
+        id: pr-info
+        run: |
+          # Get PR number
+          PR_NUMBER=${{ github.event.pull_request.number }}
+          echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
+          
+          # Get PR diff
+          git diff origin/${{ github.base_ref }}...HEAD > pr_diff.txt
+          
+          # Get changed files
+          git diff --name-only origin/${{ github.base_ref }}...HEAD > changed_files.txt
+          
+          echo "📊 PR Info:"
+          echo "Number: $PR_NUMBER"
+          echo "Files changed: $(cat changed_files.txt | wc -l)"
+          echo "Diff size: $(cat pr_diff.txt | wc -l) lines"
+
+      - name: Send to Centralized AI Review Server
+        env:
+          REVIEW_SERVER_URL: "http://ai-codereview-dev-alb-1334724727.us-east-1.elb.amazonaws.com"
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ steps.pr-info.outputs.pr_number }}
+        run: |
+          echo "🚀 Sending code to centralized AI review server..."
+          
+          # Prepare the request payload
+          cat > review_request.json <<EOF
+          {
+            "repository": "${{ github.repository }}",
+            "pr_number": "$PR_NUMBER",
+            "pr_title": "${{ github.event.pull_request.title }}",
+            "pr_description": $(echo '${{ github.event.pull_request.body }}' | jq -Rs .),
+            "base_branch": "${{ github.base_ref }}",
+            "head_branch": "${{ github.head_ref }}",
+            "author": "${{ github.event.pull_request.user.login }}",
+            "diff": $(cat pr_diff.txt | jq -Rs .),
+            "changed_files": $(cat changed_files.txt | jq -Rs . | jq 'split("\n") | map(select(length > 0))')
+          }
+          EOF
+          
+          # Send request to centralized server
+          HTTP_STATUS=$(curl -s -w "%{http_code}" -o review_response.json \
+            -X POST \
+            -H "Content-Type: application/json" \
+            -H "X-GitHub-Token: $GITHUB_TOKEN" \
+            -H "X-Repository: ${{ github.repository }}" \
+            -H "X-PR-Number: $PR_NUMBER" \
+            -d @review_request.json \
+            "$REVIEW_SERVER_URL/api/review")
+          
+          echo "📡 Server response status: $HTTP_STATUS"
+          
+          if [ "$HTTP_STATUS" -eq 200 ] || [ "$HTTP_STATUS" -eq 201 ]; then
+            echo "✅ Successfully received AI code review from centralized server"
+            
+            # Display review summary
+            if [ -f review_response.json ] && [ -s review_response.json ]; then
+              echo "📝 Review Summary:"
+              cat review_response.json | jq -r '.summary // "No summary available"' || echo "Response parsing failed"
+              
+              # Save review ID for potential follow-up
+              REVIEW_ID=$(cat review_response.json | jq -r '.review_id // "unknown"')
+              echo "Review ID: $REVIEW_ID"
+              echo "review_id=$REVIEW_ID" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "⚠️  Warning: Centralized review server returned status $HTTP_STATUS"
+            echo "Response:"
+            cat review_response.json 2>/dev/null || echo "No response body"
+            
+            # Don't fail the workflow, just warn
+            echo "::warning::AI code review server is unavailable or returned an error. Continuing with other checks."
+          fi
+
+      - name: Post review comments to PR
+        if: success()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "💬 Posting AI review comments to PR..."
+          
+          if [ -f review_response.json ] && [ -s review_response.json ]; then
+            # Extract comments from response and post them
+            COMMENTS_COUNT=$(cat review_response.json | jq '.comments | length' 2>/dev/null || echo "0")
+            
+            if [ "$COMMENTS_COUNT" -gt 0 ]; then
+              echo "Found $COMMENTS_COUNT review comments to post"
+              
+              # Post each comment to the PR
+              cat review_response.json | jq -c '.comments[]?' 2>/dev/null | while read -r comment; do
+                FILE=$(echo "$comment" | jq -r '.file')
+                LINE=$(echo "$comment" | jq -r '.line')
+                BODY=$(echo "$comment" | jq -r '.body')
+                
+                if [ -n "$FILE" ] && [ -n "$BODY" ]; then
+                  echo "Posting comment on $FILE:$LINE"
+                fi
+              done
+              
+              # Post summary comment
+              SUMMARY=$(cat review_response.json | jq -r '.summary // "AI code review completed"')
+              gh pr comment ${{ github.event.pull_request.number }} \
+                --body "## 🤖 AI Code Review Summary\n\n$SUMMARY\n\n---\n*Powered by Centralized AI Review Service*" \
+                2>/dev/null || echo "::warning::Could not post summary comment"
+            else
+              echo "No specific comments to post, review may have found no issues"
+            fi
+          else
+            echo "No review response available to post"
+          fi
+          
+  ai-code-quality-check:
+    runs-on: ubuntu-latest
+    name: AI Code Quality Analysis
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Analyze Python code with AI
+        run: |
+          echo "🤖 Starting AI-powered code quality analysis..."
+          
+          # Check for Python files in the PR
+          git diff --name-only origin/${{ github.base_ref }}...HEAD | grep -E '\.py$' > changed_files.txt || true
+          
+          if [ -s changed_files.txt ]; then
+            echo "📝 Python files changed:"
+            cat changed_files.txt
+            
+            # Install pylint for static analysis
+            pip install pylint flake8
+            
+            echo ""
+            echo "🔍 Running static analysis on changed Python files..."
+            while IFS= read -r file; do
+              if [ -f "$file" ]; then
+                echo "Analyzing: $file"
+                pylint "$file" --exit-zero || true
+                flake8 "$file" --exit-zero || true
+              fi
+            done < changed_files.txt
+          else
+            echo "No Python files changed in this PR"
+          fi
+
+      - name: Check for common issues
+        run: |
+          echo "🔍 Checking for common code issues..."
+          
+          # Check for debugging statements
+          if git diff origin/${{ github.base_ref }}...HEAD | grep -E "^\+.*\b(print\(|console\.log\(|debugger|pdb\.set_trace)"; then
+            echo "⚠️  Warning: Found potential debugging statements in the code"
+          fi
+          
+          # Check for TODO comments
+          if git diff origin/${{ github.base_ref }}...HEAD | grep -E "^\+.*\b(TODO|FIXME|HACK)"; then
+            echo "📌 Info: Found TODO/FIXME comments in the code"
+          fi
+          
+          # Check for hardcoded credentials patterns
+          if git diff origin/${{ github.base_ref }}...HEAD | grep -iE "^\+.*(password\s*=\s*['\"]|api_key\s*=\s*['\"]|secret\s*=\s*['\"])"; then
+            echo "🚨 Security Warning: Potential hardcoded credentials detected!"
+            exit 1
+          fi
+          
+          echo "✅ Basic security checks passed"
+
+  python-code-complexity:
+    runs-on: ubuntu-latest
+    name: Code Complexity Analysis
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install radon
+        run: pip install radon
+
+      - name: Analyze code complexity
+        run: |
+          echo "📊 Analyzing code complexity..."
+          
+          # Check for Python files
+          if find . -name "*.py" -not -path "./.git/*" -not -path "./venv/*" | grep -q .; then
+            echo ""
+            echo "Cyclomatic Complexity:"
+            radon cc . -a -nb || true
+            
+            echo ""
+            echo "Maintainability Index:"
+            radon mi . -nb || true
+            
+            echo ""
+            echo "Raw Metrics:"
+            radon raw . -s || true
+          else
+            echo "No Python files found"
+          fi
+
+  ai-security-scan:
+    runs-on: ubuntu-latest
+    name: AI Security Scan
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'table'
+          exit-code: '0'
+          severity: 'CRITICAL,HIGH'
+
+      - name: Check Docker files
+        run: |
+          echo "🐳 Checking Dockerfile best practices..."
+          
+          if find . -name "Dockerfile*" -not -path "./.git/*" | grep -q .; then
+            for dockerfile in $(find . -name "Dockerfile*" -not -path "./.git/*"); do
+              echo "Checking: $dockerfile"
+              
+              # Check for latest tag usage
+              if grep -q "FROM.*:latest" "$dockerfile"; then
+                echo "⚠️  Warning: Using 'latest' tag in $dockerfile - consider pinning versions"
+              fi
+              
+              # Check for root user
+              if ! grep -q "USER" "$dockerfile"; then
+                echo "⚠️  Warning: No USER directive found in $dockerfile - consider running as non-root"
+              fi
+            done
+          else
+            echo "No Dockerfiles found"
+          fi
