@@ -80,9 +80,20 @@ jobs:
           echo "📦 Request payload prepared ($(wc -c < review_request.json) bytes)"
           echo "📄 Files to review: $(jq '.files | length' review_request.json)"
           
-          # Debug: Show payload structure (redact large diff field)
-          echo "📋 Payload structure:"
-          jq '{repository, pr_number, pr_title, base_branch, head_branch, author, files, diff_length: (.diff | length)}' review_request.json
+          # Debug: Show complete payload structure (redact large diff field)
+          echo "📋 Complete payload structure:"
+          jq '{
+            repository, 
+            pr_number, 
+            pr_title, 
+            pr_description, 
+            base_branch, 
+            head_branch, 
+            author, 
+            files, 
+            diff_length: (.diff | length),
+            diff_sample: (.diff | .[0:200])
+          }' review_request.json
           
           # Validate JSON structure
           if ! jq empty review_request.json 2>/dev/null; then

@@ -143,29 +143,29 @@ Response: {"error":"Batch review failed","details":"Cannot read properties of un
 
 **Immediate Actions:**
 1. **Check the debug output** in workflow logs for:
-   - "📋 Payload structure:" - shows what's being sent
+   - "📋 Complete payload structure:" - shows full structure being sent
+   - "📄 Files to review: N" - confirms files array is populated
    - "🔍 Debug Info:" - shows first part of request
 
-2. **Verify payload matches API spec:**
-   ```json
-   {
-     "repository": "owner/repo",
-     "pr_number": 123,        // Number, not string
-     "pr_title": "...",
-     "pr_description": "...", // Can be empty string
-     "base_branch": "main",
-     "head_branch": "feature/...",
-     "author": "username",
-     "diff": "...",           // Full git diff
-     "files": ["file1.py"]    // Non-empty array
-   }
-   ```
+2. **Verify all required fields are present:**
+   - Check the "📋 Complete payload structure" output
+   - Ensure `files` array has elements
+   - Confirm `diff` has content
 
-3. **Contact admin team** with:
+3. **Contact admin team immediately** with:
    - Workflow run URL
-   - The "📋 Payload structure" output from logs
-   - Error message details
-   - Request them to check server-side logs for the specific error
+   - The complete "📋 Complete payload structure" output
+   - Error message: `{"error":"Batch review failed","details":"Cannot read properties of undefined (reading 'split')"}`
+   - Ask them to check **server-side logs** for:
+     - Which field is undefined
+     - Stack trace showing where `.split()` is being called
+     - Expected payload format vs. received format
+
+**Common Causes:**
+- Server expects different field names (e.g., `prNumber` vs `pr_number`)
+- Server expects nested structure (e.g., `{pr: {number: 1}}` vs `{pr_number: 1}`)
+- Server-side bug trying to parse undefined field
+- Server reading from wrong location (query params instead of body)
 
 **Workaround:**
 If the issue persists, you can disable the AI review temporarily:
