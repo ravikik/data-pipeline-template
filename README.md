@@ -131,13 +131,33 @@ The AI code review workflow will automatically run on:
 
 ### How It Works
 
-The AI code review workflow consists of **five jobs**:
+The AI code review workflow consists of **six jobs**:
 
 1. **ai-code-review**: Sends code changes to centralized AI review server, which analyzes the code and returns review comments
 2. **ai-code-quality-check**: Python-specific quality analysis with pylint and flake8
 3. **python-code-complexity**: Analyzes cyclomatic complexity and maintainability metrics
 4. **ai-security-scan**: Scans for security vulnerabilities and checks Docker best practices
 5. **aggregate-review-results**: Combines all findings into comprehensive report and PR comment
+6. **quality-gate**: 🚦 **Calculates quality score and blocks merge if score < 90**
+
+### 🚦 Quality Gate Enforcement
+
+Every PR receives a **quality score (0-100)** based on issues severity:
+- 🚨 Critical: -20 points each
+- ❌ Error: -10 points each
+- ⚠️  Warning: -5 points each
+- 💡 Info: -1 point each
+
+**Minimum Score Required:** 90 / 100
+
+**If score < 90:** ❌ Workflow fails, PR is blocked from merging until issues are addressed.
+
+**Example scoring:**
+- 0 critical, 0 errors, 2 warnings, 0 info = Score 90 ✅ (Just passing)
+- 1 critical, 2 errors, 0 warnings, 0 info = Score 60 ❌ (Blocked)
+- 0 critical, 0 errors, 0 warnings, 5 info = Score 95 ✅ (Excellent!)
+
+📖 **Complete Guide:** [Quality Gate Documentation](.github/QUALITY_GATE_GUIDE.md)
 
 ### 📊 Review Reports & Analytics
 
@@ -167,6 +187,27 @@ For detailed documentation, see [.github/workflows/README.md](.github/workflows/
 - ✅ **Enterprise Features**: Advanced security and compliance features
 - ✅ **Comprehensive Reporting**: Aggregated findings from all review tools
 - ✅ **Analytics & Metrics**: Track code quality trends over time
+
+### 🔄 Managing Across Multiple Repositories
+
+For organizations with multiple repositories, you can use **reusable workflows** to manage the AI code review system centrally:
+
+- **Define once, use everywhere** - Single source of truth
+- **Automatic updates** - Changes apply to all repositories
+- **Repository-specific customization** - Override defaults per repo
+- **Version control** - Pin to specific versions or use latest
+
+📖 **Full guide:** [.github/MULTI_REPO_MANAGEMENT.md](.github/MULTI_REPO_MANAGEMENT.md)
+
+**Quick example for other repos:**
+```yaml
+# .github/workflows/ai-code-review.yml
+jobs:
+  review:
+    uses: your-org/github-workflows/.github/workflows/ai-code-review-reusable.yml@main
+    secrets:
+      ai-review-token: ${{ secrets.AI_REVIEW_ACCESS_TOKEN }}
+```
 
 ## Writing pipelines
 

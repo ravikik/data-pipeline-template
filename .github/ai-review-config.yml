@@ -56,6 +56,41 @@ thresholds:
   # Maximum file length (lines)
   max_file_length: 500
 
+# Quality Gate Enforcement
+quality_gate:
+  # Enable quality gate (blocks merge if score below threshold)
+  enabled: true
+  
+  # Minimum quality score required (0-100)
+  minimum_score: 90
+  
+  # Scoring penalties per issue severity
+  scoring:
+    critical_penalty: 20  # Points deducted per critical issue
+    error_penalty: 10     # Points deducted per error
+    warning_penalty: 5    # Points deducted per warning
+    info_penalty: 1       # Points deducted per info/suggestion
+  
+  # Grade thresholds
+  grades:
+    a_plus: 95   # Score >= 95: A+ (Excellent)
+    a: 90        # Score >= 90: A (Good)
+    b: 80        # Score >= 80: B (Fair)
+    c: 70        # Score >= 70: C (Poor)
+    d: 60        # Score >= 60: D (Very Poor)
+    # Score < 60: F (Failing)
+  
+  # Enforcement options
+  enforcement:
+    # Block PR merge if score below minimum
+    block_merge: true
+    
+    # Post detailed score breakdown as PR comment
+    post_comment: true
+    
+    # Include improvement suggestions
+    suggest_improvements: true
+
 # Security Checks
 security:
   # Check for hardcoded secrets

@@ -159,6 +159,148 @@ The centralized AI service analyzes your code for:
 - **Performance** optimizations
 - **Documentation** improvements
 
+## 📊 Quality Gate & Scoring System
+
+### Overview
+
+Every PR receives a **quality score (0-100)** based on issues found. PRs must score **≥90** to be eligible for merge.
+
+📖 **Complete Guide:** [QUALITY_GATE_GUIDE.md](QUALITY_GATE_GUIDE.md)
+
+### Scoring Formula
+
+**Starting Score:** 100 points
+
+**Deductions:**
+- 🚨 **Critical Issue:** -20 points each
+- ❌ **Error:** -10 points each  
+- ⚠️  **Warning:** -5 points each
+- 💡 **Info/Suggestion:** -1 point each
+
+**Final Score:** `100 - (critical×20 + errors×10 + warnings×5 + info×1)`
+
+### Grade Scale
+
+| Grade | Score | Status | Can Merge? |
+|-------|-------|--------|------------|
+| 🏆 A+ | 95-100 | Excellent | ✅ Yes |
+| ⭐ A | 90-94 | Good | ✅ Yes |
+| 👍 B | 80-89 | Fair | ❌ **Blocked** |
+| ⚠️  C | 70-79 | Poor | ❌ **Blocked** |
+| ❌ D | 60-69 | Very Poor | ❌ **Blocked** |
+| 🚫 F | 0-59 | Failing | ❌ **Blocked** |
+
+**Minimum Required Score:** 90 / 100
+
+### Examples
+
+#### Example 1: Excellent Code
+```
+Issues found:
+  🚨 Critical: 0
+  ❌ Errors: 0
+  ⚠️  Warnings: 1
+  💡 Info: 3
+
+Score: 100 - (0×20 + 0×10 + 1×5 + 3×1) = 92
+Grade: A ⭐
+Status: ✅ PASSED - May proceed to merge
+```
+
+#### Example 2: Needs Improvement  
+```
+Issues found:
+  🚨 Critical: 1
+  ❌ Errors: 2
+  ⚠️  Warnings: 4
+  💡 Info: 5
+
+Score: 100 - (1×20 + 2×10 + 4×5 + 5×1) = 45
+Grade: F 🚫
+Status: ❌ BLOCKED - Quality standards not met
+```
+
+#### Example 3: Just Passing
+```
+Issues found:
+  🚨 Critical: 0
+  ❌ Errors: 1
+  ⚠️  Warnings: 0
+  💡 Info: 0
+
+Score: 100 - (0×20 + 1×10 + 0×5 + 0×1) = 90
+Grade: A ⭐
+Status: ✅ PASSED - Minimum threshold met
+```
+
+### What Happens When You Fail?
+
+If your score is **below 90**:
+
+1. ❌ **Workflow fails** - PR cannot be merged
+2. 📊 **Score posted** to PR comments with detailed breakdown
+3. 💡 **Improvement suggestions** provided
+4. 🔄 **Fix and re-run** - Push updates to trigger new review
+
+### Improving Your Score
+
+**Priority order for maximum impact:**
+
+1. **Fix Critical Issues First** 
+   - Each fix: +20 points
+   - Often security or breaking issues
+   - Biggest score impact
+
+2. **Address Errors**
+   - Each fix: +10 points
+   - Usually logic or syntax problems
+   - High ROI for score improvement
+
+3. **Review Warnings**
+   - Each fix: +5 points
+   - Best practices and code quality
+   - Good for fine-tuning score
+
+4. **Consider Info Items**
+   - Each fix: +1 point
+   - Minor improvements
+   - Useful when close to threshold
+
+### Quick Improvement Guide
+
+**Need +10 points?**
+- Fix 1 error, OR
+- Fix 2 warnings, OR  
+- Fix 1 critical (gains 20, use 10)
+
+**Need +20 points?**
+- Fix 1 critical issue, OR
+- Fix 2 errors, OR
+- Fix 4 warnings
+
+**Need +30 points?**
+- Fix 1 critical + 1 error, OR
+- Fix 3 errors, OR
+- Fix 6 warnings
+
+### Bypassing Quality Gate
+
+**Not Recommended** - but if absolutely necessary:
+
+Contact your team lead or admin to:
+- Request temporary threshold adjustment
+- Get override approval
+- Document business justification
+
+The quality gate protects code quality - bypassing defeats its purpose.
+
+### Monitoring Your Score
+
+- **PR Comment:** Detailed score breakdown posted automatically
+- **Workflow Status:** Check mark (✅) or X (❌) in PR checks
+- **Analytics Dashboard:** Track score trends over time
+- **Artifacts:** Download `quality-score.json` for details
+
 ## Best Practices for Working with AI Review
 
 ### Before Opening a PR
@@ -166,17 +308,19 @@ The centralized AI service analyzes your code for:
 1. ✅ Run local tests: `make ci`
 2. ✅ Check your code complexity: `radon cc . -a`
 3. ✅ Run linters locally: `pylint your_file.py`
-4. ✅ Remove debug statements
+4. ✅ Remove debug statements  
 5. ✅ Add appropriate comments
+6. ✅ **Aim for score ≥95** for excellent quality
 
 ### After Opening a PR
 
 1. 📬 Wait for AI review to complete (~2-5 minutes)
-2. 📖 Read all review comments carefully
-3. 🔍 Address critical issues and warnings
-4. 💬 Respond to comments you disagree with (explain your reasoning)
-5. ✅ Mark conversations as resolved when fixed
-6. 🔄 Push updates to trigger re-review
+2. 📊 **Check your quality score** in PR comments
+3. 📖 Read all review comments carefully
+4. 🔍 Address critical issues and errors first (for best score improvement)
+5. 💬 Respond to comments you disagree with (explain your reasoning)
+6. ✅ Mark conversations as resolved when fixed
+7. 🔄 Push updates to trigger re-review
 
 ### Responding to AI Comments
 
@@ -361,8 +505,8 @@ A: Not currently. The workflow is designed to run in GitHub Actions.
 A: Yes, code diffs are sent to the centralized AI review service. The service is managed by your organization and follows enterprise security and compliance standard
 ## Support
 
-- 📚 Full documentation: [.github/workflows/README.md](../.github/workflows/README.md)
-- 🐛 Issues with workflows: Check Actions tab for logs
+- 📚 Full documentation: [.github/workflows/README.md](../.github/workflows/README.md)- 🚦 Quality gate details: [QUALITY_GATE_GUIDE.md](QUALITY_GATE_GUIDE.md)- � Multi-repo management: [MULTI_REPO_MANAGEMENT.md](MULTI_REPO_MANAGEMENT.md)
+- �🐛 Issues with workflows: Check Actions tab for logs
 - 💬 Questions: Open an issue or ask in pull request comments
 - 🔧 Configuration help: See [ai-review-config.yml](../.github/ai-review-config.yml)
 

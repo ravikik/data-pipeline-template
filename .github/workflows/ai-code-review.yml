@@ -705,3 +705,269 @@ jobs:
           name: review-metrics
           path: metrics-data/
           retention-days: 365
+
+  quality-gate:
+    runs-on: ubuntu-latest
+    name: Quality Gate - Enforce Standards
+    needs: aggregate-review-results
+    if: always()
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Download aggregated results
+        uses: actions/download-artifact@v4
+        with:
+          name: code-review-report
+          path: ./
+
+      - name: Calculate quality score
+        id: score
+        run: |
+          echo "📊 Calculating code quality score..."
+          
+          # Load aggregated results
+          CRITICAL=$(jq -r '.issues_by_severity.critical // 0' aggregated-results.json)
+          ERRORS=$(jq -r '.issues_by_severity.error // 0' aggregated-results.json)
+          WARNINGS=$(jq -r '.issues_by_severity.warning // 0' aggregated-results.json)
+          INFO=$(jq -r '.issues_by_severity.info // 0' aggregated-results.json)
+          TOTAL=$(jq -r '.total_issues // 0' aggregated-results.json)
+          
+          echo "Issues found:"
+          echo "  🚨 Critical: $CRITICAL"
+          echo "  ❌ Errors: $ERRORS"
+          echo "  ⚠️  Warnings: $WARNINGS"
+          echo "  💡 Info: $INFO"
+          echo "  📊 Total: $TOTAL"
+          
+          # Calculate score (start at 100, deduct points)
+          # Critical: -20 points each (most severe)
+          # Error: -10 points each
+          # Warning: -5 points each
+          # Info: -1 point each
+          SCORE=100
+          SCORE=$((SCORE - (CRITICAL * 20)))
+          SCORE=$((SCORE - (ERRORS * 10)))
+          SCORE=$((SCORE - (WARNINGS * 5)))
+          SCORE=$((SCORE - (INFO * 1)))
+          
+          # Ensure score doesn't go below 0
+          if [ $SCORE -lt 0 ]; then
+            SCORE=0
+          fi
+          
+          echo ""
+          echo "📈 Quality Score: $SCORE / 100"
+          
+          # Determine grade
+          if [ $SCORE -ge 95 ]; then
+            GRADE="A+"
+            EMOJI="🏆"
+          elif [ $SCORE -ge 90 ]; then
+            GRADE="A"
+            EMOJI="⭐"
+          elif [ $SCORE -ge 80 ]; then
+            GRADE="B"
+            EMOJI="👍"
+          elif [ $SCORE -ge 70 ]; then
+            GRADE="C"
+            EMOJI="⚠️"
+          elif [ $SCORE -ge 60 ]; then
+            GRADE="D"
+            EMOJI="❌"
+          else
+            GRADE="F"
+            EMOJI="🚫"
+          fi
+          
+          echo "📝 Grade: $GRADE $EMOJI"
+          
+          # Save outputs
+          echo "score=$SCORE" >> $GITHUB_OUTPUT
+          echo "grade=$GRADE" >> $GITHUB_OUTPUT
+          echo "emoji=$EMOJI" >> $GITHUB_OUTPUT
+          echo "critical=$CRITICAL" >> $GITHUB_OUTPUT
+          echo "errors=$ERRORS" >> $GITHUB_OUTPUT
+          echo "warnings=$WARNINGS" >> $GITHUB_OUTPUT
+          echo "info=$INFO" >> $GITHUB_OUTPUT
+          
+          # Create quality score file
+          cat > quality-score.json << EOF
+          {
+            "score": $SCORE,
+            "grade": "$GRADE",
+            "threshold": 90,
+            "passed": $([ $SCORE -ge 90 ] && echo "true" || echo "false"),
+            "issues": {
+              "critical": $CRITICAL,
+              "errors": $ERRORS,
+              "warnings": $WARNINGS,
+              "info": $INFO,
+              "total": $TOTAL
+            },
+            "scoring_formula": {
+              "base": 100,
+              "critical_penalty": 20,
+              "error_penalty": 10,
+              "warning_penalty": 5,
+              "info_penalty": 1
+            }
+          }
+          EOF
+          
+          cat quality-score.json
+
+      - name: Post quality score to PR
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "💬 Posting quality score to PR..."
+          
+          SCORE=${{ steps.score.outputs.score }}
+          GRADE=${{ steps.score.outputs.grade }}
+          EMOJI=${{ steps.score.outputs.emoji }}
+          CRITICAL=${{ steps.score.outputs.critical }}
+          ERRORS=${{ steps.score.outputs.errors }}
+          WARNINGS=${{ steps.score.outputs.warnings }}
+          INFO=${{ steps.score.outputs.info }}
+          
+          # Determine status message
+          if [ $SCORE -ge 90 ]; then
+            STATUS="✅ **PASSED** - Quality standards met"
+            STATUS_COLOR="🟢"
+          else
+            STATUS="❌ **FAILED** - Quality score below threshold (90)"
+            STATUS_COLOR="🔴"
+          fi
+          
+          cat > quality-score-comment.md << EOF
+          ## 📊 Code Quality Score: $SCORE / 100 $EMOJI
+          
+          **Grade:** $GRADE | **Status:** $STATUS_COLOR $STATUS
+          
+          ---
+          
+          ### 📉 Score Breakdown
+          
+          | Severity | Count | Points Deducted | Formula |
+          |----------|-------|-----------------|---------|
+          | 🚨 Critical | $CRITICAL | -$((CRITICAL * 20)) | $CRITICAL × 20 |
+          | ❌ Error | $ERRORS | -$((ERRORS * 10)) | $ERRORS × 10 |
+          | ⚠️  Warning | $WARNINGS | -$((WARNINGS * 5)) | $WARNINGS × 5 |
+          | 💡 Info | $INFO | -$((INFO * 1)) | $INFO × 1 |
+          
+          **Starting Score:** 100  
+          **Total Deductions:** -$((100 - SCORE))  
+          **Final Score:** **$SCORE**
+          
+          ---
+          
+          ### 📏 Quality Standards
+          
+          | Grade | Score Range | Status |
+          |-------|-------------|---------|
+          | 🏆 A+ | 95-100 | Excellent |
+          | ⭐ A | 90-94 | Good - **Merge Allowed** ✅ |
+          | 👍 B | 80-89 | Fair - **Blocked** ❌ |
+          | ⚠️  C | 70-79 | Poor - **Blocked** ❌ |
+          | ❌ D | 60-69 | Very Poor - **Blocked** ❌ |
+          | 🚫 F | 0-59 | Failing - **Blocked** ❌ |
+          
+          **Minimum Required Score:** 90 / 100
+          
+          ---
+          
+          ### 🎯 Next Steps
+          
+          EOF
+          
+          if [ $SCORE -ge 90 ]; then
+            cat >> quality-score-comment.md << EOF
+          ✅ **Your PR meets the quality standards!**
+          
+          - Score is **$SCORE** (threshold: 90)
+          - You may proceed with merge after required approvals
+          - Great job maintaining code quality! 🎉
+          EOF
+          else
+            POINTS_NEEDED=$((90 - SCORE))
+            cat >> quality-score-comment.md << EOF
+          ❌ **Your PR does not meet quality standards**
+          
+          - Current score: **$SCORE** (threshold: 90)
+          - Points needed: **$POINTS_NEEDED**
+          - **This PR will be blocked from merging**
+          
+          **To improve your score:**
+          
+          1. Fix critical issues first (-20 points each)
+          2. Address error-level issues (-10 points each)
+          3. Consider fixing warnings (-5 points each)
+          4. Review informational suggestions (-1 point each)
+          
+          **Example improvement paths:**
+          EOF
+            
+            if [ $CRITICAL -gt 0 ]; then
+              echo "- ✅ Fix **1 critical** issue → Score becomes $((SCORE + 20))" >> quality-score-comment.md
+            fi
+            if [ $ERRORS -gt 0 ]; then
+              echo "- ✅ Fix **2 errors** → Score becomes $((SCORE + 20))" >> quality-score-comment.md
+            fi
+            if [ $WARNINGS -gt 1 ]; then
+              echo "- ✅ Fix **4 warnings** → Score becomes $((SCORE + 20))" >> quality-score-comment.md
+            fi
+          fi
+          
+          cat >> quality-score-comment.md << EOF
+          
+          ---
+          
+          *🔍 See detailed review comments above for specific issues to address*  
+          *📥 Download the full report from workflow artifacts for complete analysis*
+          EOF
+          
+          gh pr comment ${{ github.event.pull_request.number }} --body-file quality-score-comment.md
+          
+          echo "✅ Quality score posted to PR"
+
+      - name: Enforce quality gate
+        run: |
+          SCORE=${{ steps.score.outputs.score }}
+          THRESHOLD=90
+          
+          echo "🚦 Enforcing quality gate..."
+          echo "Score: $SCORE"
+          echo "Threshold: $THRESHOLD"
+          
+          if [ $SCORE -lt $THRESHOLD ]; then
+            echo ""
+            echo "❌ QUALITY GATE FAILED"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "Code quality score ($SCORE) is below the required threshold ($THRESHOLD)"
+            echo ""
+            echo "This PR is blocked from merging until quality standards are met."
+            echo ""
+            echo "Please address the issues identified in the review and push updates."
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo ""
+            exit 1
+          else
+            echo ""
+            echo "✅ QUALITY GATE PASSED"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "Code quality score ($SCORE) meets the required threshold ($THRESHOLD)"
+            echo ""
+            echo "Quality standards satisfied. PR may proceed to merge (pending approvals)."
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo ""
+          fi
+
+      - name: Upload quality score
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: quality-score
+          path: quality-score.json
+          retention-days: 90
+
