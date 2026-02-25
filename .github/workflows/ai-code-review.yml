@@ -294,7 +294,7 @@ jobs:
             exit 1
           fi
           
-          echo "✅ Basic security checks passed"
+          echo "✅ Basic security checks passed "
 
   python-code-complexity:
     runs-on: ubuntu-latest
