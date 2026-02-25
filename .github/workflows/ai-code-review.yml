@@ -724,7 +724,7 @@ jobs:
           name: code-review-report
           path: ./
 
-      - name: Calculate quality score
+      - name: Calculate Quality Score
         id: score
         run: |
           echo "📊 Calculating code quality score..."
