@@ -1,0 +1,53 @@
+# AI Code Review - Simple Caller Workflow
+
+# This is the simplified workflow file that each repository should have
+# when using the centralized reusable workflow approach.
+
+# Replace 'your-org' with your actual GitHub organization name.
+
+name: AI Code Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  ai-review:
+    # Call the reusable workflow from your central workflows repository
+    uses: your-org/github-workflows/.github/workflows/ai-code-review-reusable.yml@main
+    
+    # Customize settings for this specific repository (all optional)
+    with:
+      # Enable/disable specific checks
+      enable-quality-check: true        # Set to false to skip static analysis
+      enable-complexity-check: true     # Set to false to skip complexity checks
+      enable-security-scan: true        # Set to false to skip security scanning
+      
+      # Adjust thresholds
+      complexity-threshold: 10          # Max cyclomatic complexity (default: 10)
+      
+      # Tool versions
+      python-version: '3.10'            # Python version for analysis (default: '3.10')
+    
+    # Pass the AI review access token
+    secrets:
+      ai-review-token: ${{ secrets.AI_REVIEW_ACCESS_TOKEN }}
+
+# That's it! The reusable workflow handles all the heavy lifting.
+# 
+# To customize for different repository types:
+#
+# Frontend/JavaScript repo (disable Python-specific checks):
+#   with:
+#     enable-quality-check: false
+#     enable-complexity-check: false
+#
+# High-complexity codebase (increase threshold):
+#   with:
+#     complexity-threshold: 15
+#
+# Security-focused repo (keep all checks enabled):
+#   with:
+#     enable-quality-check: true
+#     enable-complexity-check: true
+#     enable-security-scan: true

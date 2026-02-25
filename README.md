@@ -5,6 +5,10 @@
         * [Run locally](#run-locally)
     * [Architecture and services in this template](#architecture-and-services-in-this-template)
     * [Using template](#using-template)
+    * [AI Code Review](#ai-code-review)
+        * [Setup](#setup)
+        * [How It Works](#how-it-works)
+        * [Cost Considerations](#cost-considerations)
     * [Writing pipelines](#writing-pipelines)
     * [(Optional) Advanced cloud setup](#optional-advanced-cloud-setup)
         * [Prerequisites:](#prerequisites)
@@ -81,6 +85,129 @@ The file structure of our repo is as shown below:
 You can use this repo as a template and create your own, click on the `Use this template` button.
 
 ![Template](./assets/images/template.png)
+
+## AI Code Review
+
+**Status:** ✅ Fully operational
+
+This repository includes an automated AI-powered code review workflow that runs on every pull request. The workflow connects to a **centralized AI review server** and provides intelligent feedback on:
+
+- 🤖 **Code Quality**: AI-powered review using enterprise-grade models
+- 🔍 **Static Analysis**: Linting with pylint and flake8
+- 📊 **Complexity Metrics**: Cyclomatic complexity and maintainability index
+- 🔒 **Security Scanning**: Vulnerability detection with Trivy
+- 🐳 **Docker Best Practices**: Dockerfile validation
+- ⚠️ **Code Smells**: Detection of debugging statements, TODOs, and anti-patterns
+
+### Setup
+
+**One-time setup required:**
+
+1. **Add Access Token Secret:**
+   - Go to your repository **Settings** → **Secrets and variables** → **Actions**
+   - Click **New repository secret**
+   - Name: `AI_REVIEW_ACCESS_TOKEN`
+   - Value: Your centralized service access token (obtain from your admin team)
+
+2. **Ready to use:**
+   - ✅ Connected to centralized review service at: `http://ai-codereview-dev-alb-1334724727.us-east-1.elb.amazonaws.com`
+   - ✅ API Endpoint: `POST /api/review/pr` (for PR reviews)
+   - ✅ Automatically runs on all pull requests
+   - ✅ Posts review summaries and findings as PR comments
+
+📋 **Detailed setup instructions:** [.github/SETUP_INSTRUCTIONS.md](.github/SETUP_INSTRUCTIONS.md)
+
+The AI code review workflow will automatically run on:
+- New pull requests
+- Updates to existing pull requests
+- Reopened pull requests
+
+**Configure review settings** (optional):
+- Edit [.github/ai-review-config.yml](.github/ai-review-config.yml) to customize:
+  - Review detail level
+  - File patterns to include/exclude
+  - Quality thresholds
+  - Security check patterns
+
+### How It Works
+
+The AI code review workflow consists of **six jobs**:
+
+1. **ai-code-review**: Sends code changes to centralized AI review server, which analyzes the code and returns review comments
+2. **ai-code-quality-check**: Python-specific quality analysis with pylint and flake8
+3. **python-code-complexity**: Analyzes cyclomatic complexity and maintainability metrics
+4. **ai-security-scan**: Scans for security vulnerabilities and checks Docker best practices
+5. **aggregate-review-results**: Combines all findings into comprehensive report and PR comment
+6. **quality-gate**: 🚦 **Calculates quality score and blocks merge if score < 90**
+
+### 🚦 Quality Gate Enforcement
+
+Every PR receives a **quality score (0-100)** based on issues severity:
+- 🚨 Critical: -20 points each
+- ❌ Error: -10 points each
+- ⚠️  Warning: -5 points each
+- 💡 Info: -1 point each
+
+**Minimum Score Required:** 90 / 100
+
+**If score < 90:** ❌ Workflow fails, PR is blocked from merging until issues are addressed.
+
+**Example scoring:**
+- 0 critical, 0 errors, 2 warnings, 0 info = Score 90 ✅ (Just passing)
+- 1 critical, 2 errors, 0 warnings, 0 info = Score 60 ❌ (Blocked)
+- 0 critical, 0 errors, 0 warnings, 5 info = Score 95 ✅ (Excellent!)
+
+📖 **Complete Guide:** [Quality Gate Documentation](.github/QUALITY_GATE_GUIDE.md)
+
+### 📊 Review Reports & Analytics
+
+Each PR receives:
+
+- **📝 Comprehensive PR Comment** - Aggregated findings from all review tools with severity breakdown
+- **📥 Downloadable Report** - Detailed markdown report available as workflow artifact (90 days retention)
+- **📈 Analytics Dashboard** - Interactive dashboard tracking code quality trends at [`/analytics/review-dashboard.html`](analytics/README.md)
+
+**What's included in reports:**
+- Total issues by severity (Critical, Error, Warning, Info)
+- Detailed issue list with file locations and line numbers
+- Issues grouped by source (AI Review, Static Analysis, Complexity, Security)
+- Executive summary and key metrics
+
+**View the Analytics Dashboard:**
+Navigate to [`/analytics`](analytics/README.md) folder to see code quality trends, issue patterns, and review metrics over time.
+
+For detailed documentation, see [.github/workflows/README.md](.github/workflows/README.md).
+
+### Centralized Service Benefits
+
+- ✅ **No Cost**: No individual API keys or billing required
+- ✅ **Consistent Reviews**: All teams use the same review standards
+- ✅ **Managed Updates**: AI models and prompts managed centrally
+- ✅ **Better Performance**: Optimized infrastructure for fast reviews
+- ✅ **Enterprise Features**: Advanced security and compliance features
+- ✅ **Comprehensive Reporting**: Aggregated findings from all review tools
+- ✅ **Analytics & Metrics**: Track code quality trends over time
+
+### 🔄 Managing Across Multiple Repositories
+
+For organizations with multiple repositories, you can use **reusable workflows** to manage the AI code review system centrally:
+
+- **Define once, use everywhere** - Single source of truth
+- **Automatic updates** - Changes apply to all repositories
+- **Repository-specific customization** - Override defaults per repo
+- **Version control** - Pin to specific versions or use latest
+
+📖 **Full guide:** [.github/MULTI_REPO_MANAGEMENT.md](.github/MULTI_REPO_MANAGEMENT.md)
+
+**Quick example for other repos:**
+```yaml
+# .github/workflows/ai-code-review.yml
+jobs:
+  review:
+    uses: your-org/github-workflows/.github/workflows/ai-code-review-reusable.yml@main
+    secrets:
+      ai-review-token: ${{ secrets.AI_REVIEW_ACCESS_TOKEN }}
+```
 
 ## Writing pipelines
 

@@ -1,0 +1,973 @@
+name: AI Code Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  ai-code-review:
+    runs-on: ubuntu-latest
+    name: AI Code Review
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get PR diff and metadata
+        id: pr-info
+        run: |
+          # Get PR number
+          PR_NUMBER=${{ github.event.pull_request.number }}
+          echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
+          
+          # Get PR diff
+          git diff origin/${{ github.base_ref }}...HEAD > pr_diff.txt
+          
+          # Get changed files
+          git diff --name-only origin/${{ github.base_ref }}...HEAD > changed_files.txt
+          
+          echo "📊 PR Info:"
+          echo "Number: $PR_NUMBER"
+          echo "Files changed: $(cat changed_files.txt | wc -l)"
+          echo "Diff size: $(cat pr_diff.txt | wc -l) lines"
+          
+          # Check if there are any changed files
+          if [ ! -s changed_files.txt ]; then
+            echo "⚠️ No files changed in this PR"
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+          else
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Send to Centralized AI Review Server
+        if: steps.pr-info.outputs.has_changes == 'true'
+        env:
+          REVIEW_SERVER_URL: "http://ai-codereview-dev-alb-1334724727.us-east-1.elb.amazonaws.com"
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          AI_REVIEW_ACCESS_TOKEN: ${{ secrets.AI_REVIEW_ACCESS_TOKEN }}
+          PR_NUMBER: ${{ steps.pr-info.outputs.pr_number }}
+        run: |
+          echo "🚀 Sending code to centralized AI review server..."
+          
+          # Build JSON payload using jq to ensure proper escaping and structure
+          # Use --rawfile to handle large diffs without hitting argument list limits
+          jq -n \
+            --arg repo "${{ github.repository }}" \
+            --argjson pr_num "$PR_NUMBER" \
+            --arg pr_title "${{ github.event.pull_request.title }}" \
+            --arg pr_desc "${{ github.event.pull_request.body }}" \
+            --arg base "${{ github.base_ref }}" \
+            --arg head "${{ github.head_ref }}" \
+            --arg author "${{ github.event.pull_request.user.login }}" \
+            --rawfile diff pr_diff.txt \
+            --argjson files "$(cat changed_files.txt | jq -R -s -c 'split("\n") | map(select(length > 0))')" \
+            '{
+              repository: $repo,
+              pr_number: $pr_num,
+              pr_title: $pr_title,
+              pr_description: ($pr_desc // ""),
+              base_branch: $base,
+              head_branch: $head,
+              author: $author,
+              diff: $diff,
+              files: $files
+            }' > review_request.json
+          
+          echo "📦 Request payload prepared ($(wc -c < review_request.json) bytes)"
+          echo "📄 Files to review: $(jq '.files | length' review_request.json)"
+          
+          # Debug: Show complete payload structure (redact large diff field)
+          echo "📋 Complete payload structure:"
+          jq '{
+            repository, 
+            pr_number, 
+            pr_title, 
+            pr_description, 
+            base_branch, 
+            head_branch, 
+            author, 
+            files, 
+            diff_length: (.diff | length),
+            diff_sample: (.diff | .[0:200])
+          }' review_request.json
+          
+          # Validate JSON structure
+          if ! jq empty review_request.json 2>/dev/null; then
+            echo "❌ Invalid JSON payload generated"
+            cat review_request.json
+            exit 1
+          fi
+          
+          # Send request to centralized server
+          HTTP_STATUS=$(curl -s -w "%{http_code}" -o review_response.json \
+            -X POST \
+            -H "Content-Type: application/json" \
+            -H "x-access-token: $AI_REVIEW_ACCESS_TOKEN" \
+            -H "X-GitHub-Token: $GITHUB_TOKEN" \
+            -H "X-Repository: ${{ github.repository }}" \
+            -H "X-PR-Number: $PR_NUMBER" \
+            -d @review_request.json \
+            "$REVIEW_SERVER_URL/api/review/pr")
+          
+          echo "📡 Server response status: $HTTP_STATUS"
+          
+          if [ "$HTTP_STATUS" -eq 200 ] || [ "$HTTP_STATUS" -eq 201 ]; then
+            echo "✅ Successfully received AI code review from centralized server"
+            
+            # Display review summary
+            if [ -f review_response.json ] && [ -s review_response.json ]; then
+              echo "📝 Review Summary:"
+              cat review_response.json | jq -r '.summary // "No summary available"' || echo "Response parsing failed"
+              
+              # Save review ID for potential follow-up
+              REVIEW_ID=$(cat review_response.json | jq -r '.review_id // "unknown"')
+              echo "Review ID: $REVIEW_ID"
+              echo "review_id=$REVIEW_ID" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "⚠️  Warning: Centralized review server returned status $HTTP_STATUS"
+            echo "Response:"
+            if [ -f review_response.json ]; then
+              cat review_response.json
+              
+              # If 500 error, show more debug info
+              if [ "$HTTP_STATUS" -eq 500 ]; then
+                echo ""
+                echo "🔍 Debug Info:"
+                echo "Request payload sent (first 500 chars):"
+                head -c 500 review_request.json
+                echo "..."
+              fi
+            else
+              echo "No response body"
+            fi
+            
+            # Don't fail the workflow, just warn
+            echo "::warning::AI code review server is unavailable or returned an error. Continuing with other checks."
+          fi
+
+      - name: Save AI review results
+        if: always()
+        run: |
+          mkdir -p review-outputs
+          
+          # Save AI review response
+          if [ -f review_response.json ]; then
+            cp review_response.json review-outputs/ai-review.json
+            
+            # Extract issues in standardized format
+            cat review_response.json | jq '{
+              source: "AI Review",
+              issues: [
+                (.comments[]? // [] | {
+                  file: .file,
+                  line: (.line // .position // 0),
+                  severity: (.severity // "info"),
+                  message: (.body // .message // .text),
+                  category: "ai-review"
+                })
+              ],
+              summary: (.summary // ""),
+              total_issues: (.issues_found // .issuesFound // (.comments | length) // 0)
+            }' > review-outputs/ai-review-issues.json || echo '{"source":"AI Review","issues":[],"total_issues":0}' > review-outputs/ai-review-issues.json
+          else
+            echo '{"source":"AI Review","issues":[],"total_issues":0}' > review-outputs/ai-review-issues.json
+          fi
+          
+          echo "✅ AI review results saved"
+
+      - name: Upload AI review results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: review-results-ai
+          path: review-outputs/
+          retention-days: 30
+          
+  ai-code-quality-check:
+    runs-on: ubuntu-latest
+    name: AI Code Quality Analysis
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Analyze Python code with AI
+        run: |
+          echo "🤖 Starting AI-powered code quality analysis..."
+          
+          mkdir -p review-outputs
+          
+          # Check for Python files in the PR
+          git diff --name-only origin/${{ github.base_ref }}...HEAD | grep -E '\.py$' > changed_files.txt || true
+          
+          if [ -s changed_files.txt ]; then
+            echo "📝 Python files changed:"
+            cat changed_files.txt
+            
+            # Install pylint for static analysis
+            pip install pylint flake8
+            
+            echo ""
+            echo "🔍 Running static analysis on changed Python files..."
+            echo '{"source":"Static Analysis","issues":[]}' > review-outputs/quality-issues.json
+            
+            while IFS= read -r file; do
+              if [ -f "$file" ]; then
+                echo "Analyzing: $file"
+                
+                # Run pylint and capture output
+                pylint "$file" --output-format=json --exit-zero > pylint-output.json 2>&1 || true
+                
+                # Convert pylint output to standardized format
+                if [ -s pylint-output.json ]; then
+                  cat pylint-output.json | jq --arg file "$file" '[.[] | {
+                    file: $file,
+                    line: .line,
+                    severity: (if .type == "error" then "error" elif .type == "warning" then "warning" else "info" end),
+                    message: .message,
+                    category: "pylint",
+                    rule: .symbol
+                  }]' >> review-outputs/pylint-temp.json 2>/dev/null || true
+                fi
+                
+                # Run flake8
+                flake8 "$file" --format='{"file":"%(path)s","line":%(row)d,"column":%(col)d,"message":"%(text)s","code":"%(code)s"}' --exit-zero 2>/dev/null | \
+                  jq -s --arg file "$file" 'map({
+                    file: $file,
+                    line: .line,
+                    severity: "warning",
+                    message: .message,
+                    category: "flake8",
+                    rule: .code
+                  })' >> review-outputs/flake8-temp.json 2>/dev/null || true
+              fi
+            done < changed_files.txt
+            
+            # Merge all quality issues
+            jq -s '{
+              source: "Static Analysis",
+              issues: (.[].[] // []),
+              total_issues: ([].[] // [] | length)
+            }' review-outputs/*-temp.json 2>/dev/null > review-outputs/quality-issues.json || echo '{"source":"Static Analysis","issues":[],"total_issues":0}' > review-outputs/quality-issues.json
+            
+            rm -f review-outputs/*-temp.json pylint-output.json
+          else
+            echo "No Python files changed in this PR"
+            echo '{"source":"Static Analysis","issues":[],"total_issues":0}' > review-outputs/quality-issues.json
+          fi
+
+      - name: Upload quality check results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: review-results-quality
+          path: review-outputs/
+          retention-days: 30
+
+      - name: Check for common issues
+        run: |
+          echo "🔍 Checking for common code issues..."
+          
+          # Check for debugging statements
+          if git diff origin/${{ github.base_ref }}...HEAD | grep -E "^\+.*\b(print\(|console\.log\(|debugger|pdb\.set_trace)"; then
+            echo "⚠️  Warning: Found potential debugging statements in the code"
+          fi
+          
+          # Check for TODO comments
+          if git diff origin/${{ github.base_ref }}...HEAD | grep -E "^\+.*\b(TODO|FIXME|HACK)"; then
+            echo "📌 Info: Found TODO/FIXME comments in the code"
+          fi
+          
+          # Check for hardcoded credentials patterns
+          if git diff origin/${{ github.base_ref }}...HEAD | grep -iE "^\+.*(password\s*=\s*['\"]|api_key\s*=\s*['\"]|secret\s*=\s*['\"])"; then
+            echo "🚨 Security Warning: Potential hardcoded credentials detected!"
+            exit 1
+          fi
+          
+          echo "✅ Basic security checks passed"
+
+  python-code-complexity:
+    runs-on: ubuntu-latest
+    name: Code Complexity Analysis
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install radon
+        run: pip install radon
+
+      - name: Analyze code complexity
+        run: |
+          echo "📊 Analyzing code complexity..."
+          
+          mkdir -p review-outputs
+          
+          # Check for Python files
+          if find . -name "*.py" -not -path "./.git/*" -not -path "./venv/*" | grep -q .; then
+            echo ""
+            echo "Cyclomatic Complexity:"
+            radon cc . -a -nb -j > review-outputs/complexity-cc.json || echo '[]' > review-outputs/complexity-cc.json
+            
+            echo ""
+            echo "Maintainability Index:"
+            radon mi . -nb -j > review-outputs/complexity-mi.json || echo '{}' > review-outputs/complexity-mi.json
+            
+            # Convert to standardized format
+            cat review-outputs/complexity-cc.json | jq '{
+              source: "Complexity Analysis",
+              issues: [
+                .[][] | select(.complexity > 10) | {
+                  file: .name,
+                  line: .lineno,
+                  severity: (if .complexity > 20 then "error" elif .complexity > 15 then "warning" else "info" end),
+                  message: ("High cyclomatic complexity: " + (.complexity | tostring)),
+                  category: "complexity",
+                  complexity: .complexity
+                }
+              ],
+              total_issues: ([.[][] | select(.complexity > 10)] | length),
+              summary: "Complexity threshold: >10"
+            }' > review-outputs/complexity-issues.json || echo '{"source":"Complexity Analysis","issues":[],"total_issues":0}' > review-outputs/complexity-issues.json
+            
+          else
+            echo "No Python files found"
+            echo '{"source":"Complexity Analysis","issues":[],"total_issues":0}' > review-outputs/complexity-issues.json
+          fi
+
+      - name: Upload complexity results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: review-results-complexity
+          path: review-outputs/
+          retention-days: 30
+
+  ai-security-scan:
+    runs-on: ubuntu-latest
+    name: AI Security Scan
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'json'
+          output: 'trivy-results.json'
+          exit-code: '0'
+          severity: 'CRITICAL,HIGH,MEDIUM'
+
+      - name: Process security scan results
+        if: always()
+        run: |
+          mkdir -p review-outputs
+          
+          # Process Trivy results
+          if [ -f trivy-results.json ]; then
+            cat trivy-results.json | jq '{
+              source: "Security Scan",
+              issues: [
+                .Results[]?.Vulnerabilities[]? // [] | {
+                  file: (.PkgName // "dependency"),
+                  line: 0,
+                  severity: (if .Severity == "CRITICAL" then "critical" elif .Severity == "HIGH" then "error" else "warning" end),
+                  message: (.Title + " (" + .VulnerabilityID + ")"),
+                  category: "security",
+                  cve: .VulnerabilityID,
+                  package: .PkgName
+                }
+              ],
+              total_issues: ([.Results[]?.Vulnerabilities[]? // []] | length)
+            }' > review-outputs/security-issues.json || echo '{"source":"Security Scan","issues":[],"total_issues":0}' > review-outputs/security-issues.json
+          else
+            echo '{"source":"Security Scan","issues":[],"total_issues":0}' > review-outputs/security-issues.json
+          fi
+
+      - name: Upload security scan results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: review-results-security
+          path: review-outputs/
+          retention-days: 30
+
+      - name: Check Docker files
+        run: |
+          echo "🐳 Checking Dockerfile best practices..."
+          
+          if find . -name "Dockerfile*" -not -path "./.git/*" | grep -q .; then
+            for dockerfile in $(find . -name "Dockerfile*" -not -path "./.git/*"); do
+              echo "Checking: $dockerfile"
+              
+              # Check for latest tag usage
+              if grep -q "FROM.*:latest" "$dockerfile"; then
+                echo "⚠️  Warning: Using 'latest' tag in $dockerfile - consider pinning versions"
+              fi
+              
+              # Check for root user
+              if ! grep -q "USER" "$dockerfile"; then
+                echo "⚠️  Warning: No USER directive found in $dockerfile - consider running as non-root"
+              fi
+            done
+          else
+            echo "No Dockerfiles found"
+          fi
+
+  aggregate-review-results:
+    runs-on: ubuntu-latest
+    name: Aggregate Review Results
+    needs: [ai-code-review, ai-code-quality-check, python-code-complexity, ai-security-scan]
+    if: always()
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download all review results
+        uses: actions/download-artifact@v4
+        with:
+          pattern: review-results-*
+          path: review-outputs/
+          merge-multiple: true
+
+      - name: Aggregate all issues
+        run: |
+          echo "📊 Aggregating review results from all jobs..."
+          
+          # Merge all JSON files
+          jq -s '{
+            pr_number: ${{ github.event.pull_request.number }},
+            pr_title: "${{ github.event.pull_request.title }}",
+            repository: "${{ github.repository }}",
+            timestamp: (now | todateiso8601),
+            all_sources: map(.source),
+            total_issues: (map(.total_issues // 0) | add),
+            issues_by_severity: {
+              critical: ([.[].issues[] | select(.severity == "critical")] | length),
+              error: ([.[].issues[] | select(.severity == "error")] | length),
+              warning: ([.[].issues[] | select(.severity == "warning")] | length),
+              info: ([.[].issues[] | select(.severity == "info" or .severity == "suggestion")] | length)
+            },
+            issues_by_source: [
+              .[] | {
+                source: .source,
+                count: (.total_issues // 0),
+                issues: .issues
+              }
+            ],
+            all_issues: [.[].issues[]]
+          }' review-outputs/*-issues.json > aggregated-results.json
+          
+          echo "✅ Aggregation complete"
+          echo "📈 Summary:"
+          cat aggregated-results.json | jq '{
+            total_issues,
+            issues_by_severity,
+            sources: .all_sources
+          }'
+
+      - name: Generate review report
+        run: |
+          echo "📝 Generating comprehensive review report..."
+          
+          cat > review-report.md << 'REPORT_EOF'
+          # 🤖 Comprehensive Code Review Report
+          
+          **PR:** #${{ github.event.pull_request.number }} - ${{ github.event.pull_request.title }}
+          **Repository:** ${{ github.repository }}
+          **Author:** @${{ github.event.pull_request.user.login }}
+          **Date:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+          
+          ---
+          
+          ## 📊 Executive Summary
+          
+          REPORT_EOF
+          
+          # Add summary statistics
+          jq -r '
+            "**Total Issues Found:** " + (.total_issues | tostring) + "\n" +
+            "\n### Issues by Severity\n\n" +
+            "| Severity | Count |\n" +
+            "|----------|-------|\n" +
+            "| 🚨 Critical | " + (.issues_by_severity.critical | tostring) + " |\n" +
+            "| ❌ Error | " + (.issues_by_severity.error | tostring) + " |\n" +
+            "| ⚠️  Warning | " + (.issues_by_severity.warning | tostring) + " |\n" +
+            "| 💡 Info/Suggestion | " + (.issues_by_severity.info | tostring) + " |\n" +
+            "\n### Issues by Source\n\n" +
+            "| Source | Count |\n" +
+            "|--------|-------|\n" +
+            (.issues_by_source[] | "| " + .source + " | " + (.count | tostring) + " |") + "\n"
+          ' aggregated-results.json >> review-report.md
+          
+          # Add detailed issues section
+          cat >> review-report.md << 'REPORT_EOF'
+          
+          ---
+          
+          ## 📋 Detailed Issues
+          
+          REPORT_EOF
+          
+          # Generate detailed issue list by severity
+          for severity in critical error warning info; do
+            count=$(jq -r ".issues_by_severity.$severity" aggregated-results.json)
+            if [ "$count" -gt 0 ]; then
+              case $severity in
+                critical) emoji="🚨"; label="Critical Issues" ;;
+                error) emoji="❌"; label="Errors" ;;
+                warning) emoji="⚠️ "; label="Warnings" ;;
+                info) emoji="💡"; label="Info & Suggestions" ;;
+              esac
+              
+              echo "" >> review-report.md
+              echo "### $emoji $label ($count)" >> review-report.md
+              echo "" >> review-report.md
+              
+              jq -r --arg sev "$severity" '
+                .all_issues | 
+                map(select(.severity == $sev or ($sev == "info" and .severity == "suggestion"))) | 
+                group_by(.category) | 
+                .[] | 
+                "\n#### " + (.[0].category | ascii_upcase) + "\n" +
+                (
+                  .[] | 
+                  "- **" + (.file // "N/A") + 
+                  (if .line > 0 then ":" + (.line | tostring) else "" end) + 
+                  "**\n  " + .message + 
+                  (if .rule then " `[" + .rule + "]`" else "" end) + "\n"
+                )
+              ' aggregated-results.json >> review-report.md
+            fi
+          done
+          
+          # Add footer
+          cat >> review-report.md << 'REPORT_EOF'
+          
+          ---
+          
+          ## 🔍 Review Tools Used
+          
+          - **AI Code Review**: Centralized AI review service
+          - **Static Analysis**: Pylint & Flake8
+          - **Complexity Analysis**: Radon
+          - **Security Scanning**: Trivy
+          
+          *Report generated automatically by CI/CD pipeline*
+          REPORT_EOF
+          
+          echo "✅ Review report generated"
+
+      - name: Post comprehensive review to PR
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "💬 Posting comprehensive review to PR..."
+          
+          # Create PR comment with summary and link to full report
+          TOTAL_ISSUES=$(jq -r '.total_issues' aggregated-results.json)
+          CRITICAL=$(jq -r '.issues_by_severity.critical' aggregated-results.json)
+          ERRORS=$(jq -r '.issues_by_severity.error' aggregated-results.json)
+          WARNINGS=$(jq -r '.issues_by_severity.warning' aggregated-results.json)
+          INFO=$(jq -r '.issues_by_severity.info' aggregated-results.json)
+          
+          cat > pr-comment.md << 'COMMENT_EOF'
+          ## 🤖 Comprehensive Code Review
+          
+          COMMENT_EOF
+          
+          if [ "$TOTAL_ISSUES" -eq 0 ]; then
+            echo "✅ **Excellent!** No issues found in this review." >> pr-comment.md
+            echo "" >> pr-comment.md
+            echo "All automated checks passed successfully! 🎉" >> pr-comment.md
+          else
+            cat >> pr-comment.md << COMMENT_EOF
+          **Total Issues:** $TOTAL_ISSUES
+          
+          ### 📊 Issues Breakdown
+          
+          | Severity | Count | Status |
+          |----------|-------|--------|
+          | 🚨 Critical | $CRITICAL | $([ $CRITICAL -gt 0 ] && echo "❌ Must fix" || echo "✅") |
+          | ❌ Error | $ERRORS | $([ $ERRORS -gt 0 ] && echo "⚠️  Should fix" || echo "✅") |
+          | ⚠️  Warning | $WARNINGS | $([ $WARNINGS -gt 0 ] && echo "⚡ Review recommended" || echo "✅") |
+          | 💡 Info | $INFO | $([ $INFO -gt 0 ] && echo "📝 Optional improvements" || echo "✅") |
+          
+          ### 🔍 Top Issues by Category
+          
+          COMMENT_EOF
+            
+            # Add top 10 issues
+            jq -r '
+              .all_issues | 
+              sort_by(.severity) | 
+              reverse | 
+              .[0:10] | 
+              .[] | 
+              "- " + 
+              (if .severity == "critical" then "🚨" 
+               elif .severity == "error" then "❌" 
+               elif .severity == "warning" then "⚠️ " 
+               else "💡" end) + 
+              " **" + (.file // "N/A") + 
+              (if .line > 0 then ":" + (.line | tostring) else "" end) + 
+              "** - " + (.message | split("\n")[0])
+            ' aggregated-results.json >> pr-comment.md
+            
+            if [ "$TOTAL_ISSUES" -gt 10 ]; then
+              echo "" >> pr-comment.md
+              echo "_...and $((TOTAL_ISSUES - 10)) more issues. Download the full report for details._" >> pr-comment.md
+            fi
+          fi
+          
+          cat >> pr-comment.md << 'COMMENT_EOF'
+          
+          ---
+          
+          ### 📥 Full Report Available
+          
+          Download the complete review report from the **Actions artifacts** for detailed information on all findings.
+          
+          **Review Sources:**
+          COMMENT_EOF
+          
+          jq -r '.issues_by_source[] | "- ✓ " + .source + " (" + (.count | tostring) + " issues)"' aggregated-results.json >> pr-comment.md
+          
+          echo "" >> pr-comment.md
+          echo "*💡 Tip: Review the detailed report artifact for code-specific recommendations and improvement suggestions.*" >> pr-comment.md
+          echo "" >> pr-comment.md
+          echo "---" >> pr-comment.md
+          echo "*🔗 Powered by Centralized AI Review Service | [View Workflow Run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})*" >> pr-comment.md
+          
+          # Post comment to PR
+          gh pr comment ${{ github.event.pull_request.number }} --body-file pr-comment.md
+          
+          echo "✅ Comprehensive review posted to PR"
+
+      - name: Upload review report as artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: code-review-report
+          path: |
+            review-report.md
+            aggregated-results.json
+          retention-days: 90
+
+      - name: Save metrics for analytics
+        if: always()
+        run: |
+          echo "📈 Saving metrics for analytics dashboard..."
+          
+          # Create metrics file
+          jq '{
+            timestamp: .timestamp,
+            pr_number: .pr_number,
+            repository: .repository,
+            total_issues: .total_issues,
+            critical: .issues_by_severity.critical,
+            errors: .issues_by_severity.error,
+            warnings: .issues_by_severity.warning,
+            info: .issues_by_severity.info,
+            by_source: .issues_by_source
+          }' aggregated-results.json > metrics.json
+          
+          # In a real setup, this would be sent to a metrics store
+          # For now, we'll save it as an artifact
+          mkdir -p metrics-data
+          cp metrics.json "metrics-data/metrics-pr-${{ github.event.pull_request.number }}-$(date +%s).json"
+          
+          echo "✅ Metrics saved"
+
+      - name: Upload metrics data
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: review-metrics
+          path: metrics-data/
+          retention-days: 365
+
+  quality-gate:
+    runs-on: ubuntu-latest
+    name: Quality Gate - Enforce Standards
+    needs: aggregate-review-results
+    if: always()
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Download aggregated results
+        uses: actions/download-artifact@v4
+        with:
+          name: code-review-report
+          path: ./
+
+      - name: Calculate quality score
+        id: score
+        run: |
+          echo "📊 Calculating code quality score..."
+          
+          # Load aggregated results
+          CRITICAL=$(jq -r '.issues_by_severity.critical // 0' aggregated-results.json)
+          ERRORS=$(jq -r '.issues_by_severity.error // 0' aggregated-results.json)
+          WARNINGS=$(jq -r '.issues_by_severity.warning // 0' aggregated-results.json)
+          INFO=$(jq -r '.issues_by_severity.info // 0' aggregated-results.json)
+          TOTAL=$(jq -r '.total_issues // 0' aggregated-results.json)
+          
+          echo "Issues found:"
+          echo "  🚨 Critical: $CRITICAL"
+          echo "  ❌ Errors: $ERRORS"
+          echo "  ⚠️  Warnings: $WARNINGS"
+          echo "  💡 Info: $INFO"
+          echo "  📊 Total: $TOTAL"
+          
+          # Calculate score (start at 100, deduct points)
+          # Critical: -20 points each (most severe)
+          # Error: -10 points each
+          # Warning: -5 points each
+          # Info: -1 point each
+          SCORE=100
+          SCORE=$((SCORE - (CRITICAL * 20)))
+          SCORE=$((SCORE - (ERRORS * 10)))
+          SCORE=$((SCORE - (WARNINGS * 5)))
+          SCORE=$((SCORE - (INFO * 1)))
+          
+          # Ensure score doesn't go below 0
+          if [ $SCORE -lt 0 ]; then
+            SCORE=0
+          fi
+          
+          echo ""
+          echo "📈 Quality Score: $SCORE / 100"
+          
+          # Determine grade
+          if [ $SCORE -ge 95 ]; then
+            GRADE="A+"
+            EMOJI="🏆"
+          elif [ $SCORE -ge 90 ]; then
+            GRADE="A"
+            EMOJI="⭐"
+          elif [ $SCORE -ge 80 ]; then
+            GRADE="B"
+            EMOJI="👍"
+          elif [ $SCORE -ge 70 ]; then
+            GRADE="C"
+            EMOJI="⚠️"
+          elif [ $SCORE -ge 60 ]; then
+            GRADE="D"
+            EMOJI="❌"
+          else
+            GRADE="F"
+            EMOJI="🚫"
+          fi
+          
+          echo "📝 Grade: $GRADE $EMOJI"
+          
+          # Save outputs
+          echo "score=$SCORE" >> $GITHUB_OUTPUT
+          echo "grade=$GRADE" >> $GITHUB_OUTPUT
+          echo "emoji=$EMOJI" >> $GITHUB_OUTPUT
+          echo "critical=$CRITICAL" >> $GITHUB_OUTPUT
+          echo "errors=$ERRORS" >> $GITHUB_OUTPUT
+          echo "warnings=$WARNINGS" >> $GITHUB_OUTPUT
+          echo "info=$INFO" >> $GITHUB_OUTPUT
+          
+          # Create quality score file
+          cat > quality-score.json << EOF
+          {
+            "score": $SCORE,
+            "grade": "$GRADE",
+            "threshold": 90,
+            "passed": $([ $SCORE -ge 90 ] && echo "true" || echo "false"),
+            "issues": {
+              "critical": $CRITICAL,
+              "errors": $ERRORS,
+              "warnings": $WARNINGS,
+              "info": $INFO,
+              "total": $TOTAL
+            },
+            "scoring_formula": {
+              "base": 100,
+              "critical_penalty": 20,
+              "error_penalty": 10,
+              "warning_penalty": 5,
+              "info_penalty": 1
+            }
+          }
+          EOF
+          
+          cat quality-score.json
+
+      - name: Post quality score to PR
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "💬 Posting quality score to PR..."
+          
+          SCORE=${{ steps.score.outputs.score }}
+          GRADE=${{ steps.score.outputs.grade }}
+          EMOJI=${{ steps.score.outputs.emoji }}
+          CRITICAL=${{ steps.score.outputs.critical }}
+          ERRORS=${{ steps.score.outputs.errors }}
+          WARNINGS=${{ steps.score.outputs.warnings }}
+          INFO=${{ steps.score.outputs.info }}
+          
+          # Determine status message
+          if [ $SCORE -ge 90 ]; then
+            STATUS="✅ **PASSED** - Quality standards met"
+            STATUS_COLOR="🟢"
+          else
+            STATUS="❌ **FAILED** - Quality score below threshold (90)"
+            STATUS_COLOR="🔴"
+          fi
+          
+          cat > quality-score-comment.md << EOF
+          ## 📊 Code Quality Score: $SCORE / 100 $EMOJI
+          
+          **Grade:** $GRADE | **Status:** $STATUS_COLOR $STATUS
+          
+          ---
+          
+          ### 📉 Score Breakdown
+          
+          | Severity | Count | Points Deducted | Formula |
+          |----------|-------|-----------------|---------|
+          | 🚨 Critical | $CRITICAL | -$((CRITICAL * 20)) | $CRITICAL × 20 |
+          | ❌ Error | $ERRORS | -$((ERRORS * 10)) | $ERRORS × 10 |
+          | ⚠️  Warning | $WARNINGS | -$((WARNINGS * 5)) | $WARNINGS × 5 |
+          | 💡 Info | $INFO | -$((INFO * 1)) | $INFO × 1 |
+          
+          **Starting Score:** 100  
+          **Total Deductions:** -$((100 - SCORE))  
+          **Final Score:** **$SCORE**
+          
+          ---
+          
+          ### 📏 Quality Standards
+          
+          | Grade | Score Range | Status |
+          |-------|-------------|---------|
+          | 🏆 A+ | 95-100 | Excellent |
+          | ⭐ A | 90-94 | Good - **Merge Allowed** ✅ |
+          | 👍 B | 80-89 | Fair - **Blocked** ❌ |
+          | ⚠️  C | 70-79 | Poor - **Blocked** ❌ |
+          | ❌ D | 60-69 | Very Poor - **Blocked** ❌ |
+          | 🚫 F | 0-59 | Failing - **Blocked** ❌ |
+          
+          **Minimum Required Score:** 90 / 100
+          
+          ---
+          
+          ### 🎯 Next Steps
+          
+          EOF
+          
+          if [ $SCORE -ge 90 ]; then
+            cat >> quality-score-comment.md << EOF
+          ✅ **Your PR meets the quality standards!**
+          
+          - Score is **$SCORE** (threshold: 90)
+          - You may proceed with merge after required approvals
+          - Great job maintaining code quality! 🎉
+          EOF
+          else
+            POINTS_NEEDED=$((90 - SCORE))
+            cat >> quality-score-comment.md << EOF
+          ❌ **Your PR does not meet quality standards**
+          
+          - Current score: **$SCORE** (threshold: 90)
+          - Points needed: **$POINTS_NEEDED**
+          - **This PR will be blocked from merging**
+          
+          **To improve your score:**
+          
+          1. Fix critical issues first (-20 points each)
+          2. Address error-level issues (-10 points each)
+          3. Consider fixing warnings (-5 points each)
+          4. Review informational suggestions (-1 point each)
+          
+          **Example improvement paths:**
+          EOF
+            
+            if [ $CRITICAL -gt 0 ]; then
+              echo "- ✅ Fix **1 critical** issue → Score becomes $((SCORE + 20))" >> quality-score-comment.md
+            fi
+            if [ $ERRORS -gt 0 ]; then
+              echo "- ✅ Fix **2 errors** → Score becomes $((SCORE + 20))" >> quality-score-comment.md
+            fi
+            if [ $WARNINGS -gt 1 ]; then
+              echo "- ✅ Fix **4 warnings** → Score becomes $((SCORE + 20))" >> quality-score-comment.md
+            fi
+          fi
+          
+          cat >> quality-score-comment.md << EOF
+          
+          ---
+          
+          *🔍 See detailed review comments above for specific issues to address*  
+          *📥 Download the full report from workflow artifacts for complete analysis*
+          EOF
+          
+          gh pr comment ${{ github.event.pull_request.number }} --body-file quality-score-comment.md
+          
+          echo "✅ Quality score posted to PR"
+
+      - name: Enforce quality gate
+        run: |
+          SCORE=${{ steps.score.outputs.score }}
+          THRESHOLD=90
+          
+          echo "🚦 Enforcing quality gate..."
+          echo "Score: $SCORE"
+          echo "Threshold: $THRESHOLD"
+          
+          if [ $SCORE -lt $THRESHOLD ]; then
+            echo ""
+            echo "❌ QUALITY GATE FAILED"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "Code quality score ($SCORE) is below the required threshold ($THRESHOLD)"
+            echo ""
+            echo "This PR is blocked from merging until quality standards are met."
+            echo ""
+            echo "Please address the issues identified in the review and push updates."
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo ""
+            exit 1
+          else
+            echo ""
+            echo "✅ QUALITY GATE PASSED"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "Code quality score ($SCORE) meets the required threshold ($THRESHOLD)"
+            echo ""
+            echo "Quality standards satisfied. PR may proceed to merge (pending approvals)."
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo ""
+          fi
+
+      - name: Upload quality score
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: quality-score
+          path: quality-score.json
+          retention-days: 90
+
