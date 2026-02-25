@@ -280,7 +280,7 @@ jobs:
           
           # Check for debugging statements
           if git diff origin/${{ github.base_ref }}...HEAD | grep -E "^\+.*\b(print\(|console\.log\(|debugger|pdb\.set_trace)"; then
-            echo "⚠️  Warning: Found potential debugging statements in the code"
+            echo "⚠️  Warning : Found potential debugging statements in the code"
           fi
           
           # Check for TODO comments
@@ -290,11 +290,11 @@ jobs:
           
           # Check for hardcoded credentials patterns
           if git diff origin/${{ github.base_ref }}...HEAD | grep -iE "^\+.*(password\s*=\s*['\"]|api_key\s*=\s*['\"]|secret\s*=\s*['\"])"; then
-            echo "🚨 Security Warning: Potential hardcoded credentials detected!"
+            echo "🚨 Security Warning : Potential hardcoded credentials detected!"
             exit 1
           fi
           
-          echo "✅ Basic security checks passed"
+          echo "✅ Basic security checks passed "
 
   python-code-complexity:
     runs-on: ubuntu-latest
