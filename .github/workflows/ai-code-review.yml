@@ -766,7 +766,7 @@ jobs:
           if [ $SCORE -ge 95 ]; then
             GRADE="A+"
             EMOJI="🏆"
-          elif [ $SCORE -ge 90 ]; then
+          elif [ $SCORE -ge 85 ]; then
             GRADE="A"
             EMOJI="⭐"
           elif [ $SCORE -ge 80 ]; then
@@ -800,7 +800,7 @@ jobs:
             "score": $SCORE,
             "grade": "$GRADE",
             "threshold": 95,
-            "passed": $([ $SCORE -ge 90 ] && echo "true" || echo "false"),
+            "passed": $([ $SCORE -ge 95 ] && echo "true" || echo "false"),
             "issues": {
               "critical": $CRITICAL,
               "errors": $ERRORS,
@@ -839,7 +839,7 @@ jobs:
             STATUS="✅ **PASSED** - Quality standards met"
             STATUS_COLOR="🟢"
           else
-            STATUS="❌ **FAILED** - Quality score below threshold (90)"
+            STATUS="❌ **FAILED** - Quality score below threshold (95)"
             STATUS_COLOR="🔴"
           fi
           
@@ -869,14 +869,14 @@ jobs:
           
           | Grade | Score Range | Status |
           |-------|-------------|---------|
-          | 🏆 A+ | 95-100 | Excellent |
-          | ⭐ A | 90-94 | Good - **Merge Allowed** ✅ |
-          | 👍 B | 80-89 | Fair - **Blocked** ❌ |
+          | 🏆 A+ | 95-100 | Excellent - **Merge Allowed** ✅ |
+          | ⭐ A | 85-94 | Good - **Blocked** ❌ |
+          | 👍 B | 80-84 | Fair - **Blocked** ❌ |
           | ⚠️  C | 70-79 | Poor - **Blocked** ❌ |
           | ❌ D | 60-69 | Very Poor - **Blocked** ❌ |
           | 🚫 F | 0-59 | Failing - **Blocked** ❌ |
           
-          **Minimum Required Score:** 90 / 100
+          **Minimum Required Score:** 95 / 100
           
           ---
           
@@ -884,20 +884,20 @@ jobs:
           
           EOF
           
-          if [ $SCORE -ge 90 ]; then
+          if [ $SCORE -ge 95 ]; then
             cat >> quality-score-comment.md << EOF
           ✅ **Your PR meets the quality standards!**
           
-          - Score is **$SCORE** (threshold: 90)
+          - Score is **$SCORE** (threshold: 95)
           - You may proceed with merge after required approvals
           - Great job maintaining code quality! 🎉
           EOF
           else
-            POINTS_NEEDED=$((90 - SCORE))
+            POINTS_NEEDED=$((95 - SCORE))
             cat >> quality-score-comment.md << EOF
           ❌ **Your PR does not meet quality standards**
           
-          - Current score: **$SCORE** (threshold: 90)
+          - Current score: **$SCORE** (threshold: 95)
           - Points needed: **$POINTS_NEEDED**
           - **This PR will be blocked from merging**
           
@@ -937,7 +937,7 @@ jobs:
       - name: Enforce quality gate
         run: |
           SCORE=${{ steps.score.outputs.score }}
-          THRESHOLD=90
+          THRESHOLD=95
           
           echo "🚦 Enforcing quality gate..."
           echo "Score: $SCORE"
