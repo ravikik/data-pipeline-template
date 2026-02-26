@@ -799,7 +799,7 @@ jobs:
           {
             "score": $SCORE,
             "grade": "$GRADE",
-            "threshold": 90,
+            "threshold": 95,
             "passed": $([ $SCORE -ge 90 ] && echo "true" || echo "false"),
             "issues": {
               "critical": $CRITICAL,
