@@ -1,4 +1,4 @@
-/***********************
+/***************************************
  * Bad Scala Spark Code Example - Multiple Violations
  * This code demonstrates common anti-patterns and violations
  */
