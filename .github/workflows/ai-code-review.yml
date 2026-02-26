@@ -835,7 +835,7 @@ jobs:
           INFO=${{ steps.score.outputs.info }}
           
           # Determine status message
-          if [ $SCORE -ge 90 ]; then
+          if [ $SCORE -ge 95 ]; then
             STATUS="✅ **PASSED** - Quality standards met"
             STATUS_COLOR="🟢"
           else
